@@ -22,7 +22,10 @@ def ask_sonnet(prompt: str) -> str:
             }
         ]
     }
+
     resp = requests.post(url, json=payload, headers=headers)
     if resp.status_code == 200:
-        return resp.json()["completion"]
-    return f"⚠️ Sonnet 오류 {resp.status_code}: {resp.text}"
+        data = resp.json()
+        return data["content"][0]["text"]  # 수정된 부분
+    else:
+        return f"⚠️ Sonnet 오류 {resp.status_code}: {resp.text}"
