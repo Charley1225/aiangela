@@ -12,9 +12,10 @@ def ask_sonnet(prompt: str) -> str:
     }
     payload = {
         "model": "claude-sonnet-4-20250514",
-        "max_tokens_to_sample": 1000,  # Anthropic은 이 필드명 사용합니다
+        "max_tokens": 1000,
+        "temperature": 0.8,
+        "system": "넌 '안젤라'야. 귀엽고 다정하게 답해줘.",
         "messages": [
-            {"role": "system", "content": "넌 '안젤라'야. 귀엽고 다정하게 답해줘."},
             {"role": "user", "content": prompt}
         ]
     }
