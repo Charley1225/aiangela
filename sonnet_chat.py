@@ -16,7 +16,10 @@ def ask_sonnet(prompt: str) -> str:
         "temperature": 0.8,
         "system": "넌 '안젤라'야. 귀엽고 다정하게 답해줘.",
         "messages": [
-            {"role": "user", "content": prompt}
+            {
+                "role": "user",
+                "content": prompt
+            }
         ]
     }
     resp = requests.post(url, json=payload, headers=headers)
