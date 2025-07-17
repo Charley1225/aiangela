@@ -1,18 +1,19 @@
 import discord
-import os
+from discord.ext import commands
+from sonnet_chat import ask_sonnet
 
 intents = discord.Intents.default()
 intents.message_content = True
-
-bot = discord.Bot(intents=intents)
+bot = commands.Bot(command_prefix="!", intents=intents)
 
 @bot.event
 async def on_ready():
-    print(f"✅ 안젤라 작동 중! 로그인됨: {bot.user}")
+    print(f"Logged in as {bot.user}")
 
-@bot.slash_command(name="hello", description="봇이 인사해요")
-async def hello(ctx):
-    await ctx.respond("안녕! 나는 안젤라야 💬")
+@bot.command()
+async def 안젤라(ctx, *, message):
+    await ctx.defer()
+    reply = ask_sonnet(message)
+    await ctx.send(reply)
 
-TOKEN = os.getenv("DISCORD_BOT_TOKEN")
-bot.run(TOKEN)
+bot.run(os.getenv("DISCORD_TOKEN"))
