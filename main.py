@@ -16,4 +16,5 @@ async def 안젤라(ctx, *, message):
     reply = ask_sonnet(message)
     await ctx.send(reply)
 
-bot.run(os.getenv("DISCORD_TOKEN"))
+TOKEN = os.getenv("DISCORD_BOT_TOKEN")
+bot.run(TOKEN)
