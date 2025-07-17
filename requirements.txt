@@ -1,2 +1,2 @@
-aiohttp==3.8.1
+aiohttp==3.9.5
 py-cord==2.4.1
