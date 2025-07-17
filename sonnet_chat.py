@@ -3,17 +3,21 @@ import requests
 
 SONNET_API_KEY = os.getenv("SONNET_API_KEY")
 
-def ask_sonnet(prompt):
+def ask_sonnet(prompt: str) -> str:
     url = "https://api.sonnet.dev/chat"
     headers = {
         "Authorization": f"Bearer {SONNET_API_KEY}",
         "Content-Type": "application/json"
     }
     payload = {
+        "model": "sonnet-v1",
         "messages": [
-            {"role": "system", "content": "넌 '안젤라'라는 이름의 친구야. 사용자와 일상적인 대화를 하며, 귀엽고 재치있고 다정하게 반응해."},
+            {"role": "system", "content": "넌 '안젤라'야. 귀엽고 다정하게 답해줘."},
             {"role": "user", "content": prompt}
-        ]
+        ],
+        "temperature": 0.8
     }
-    response = requests.post(url, json=payload, headers=headers)
-    return response.json()["choices"][0]["message"]["content"]
+    resp = requests.post(url, json=payload, headers=headers)
+    if resp.status_code == 200:
+        return resp.json()["choices"][0]["message"]["content"]
+    return f"⚠️ Sonnet 오류 {resp.status_code}"
