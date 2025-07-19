@@ -176,6 +176,10 @@ def make_character_profile(mem_blocks, change_events):
             stable += s * 0.5
         if "일상" in mb["categories"]:
             stable += 0.003
+        if "유머" in mb["categories"]:
+            stable += 0.02
+        if "불안" in mb["text"] or "무서워" in mb["text"] or "떨려" in mb["text"]:
+            stable -= 0.005
     # 정서적 안정 변화폭 보정
     profile["정서적 안정"] = adjust_emotional_stability(0.6, stable, change_events)
     with open("angela_character_profile.json", "w", encoding="utf-8") as f:
