@@ -1,34 +1,23 @@
 # =================== [1] 입력 파일 감지 및 데이터 분리 ===================
 import os
 import re
+import json
 
-def detect_and_load_files():
-    """
-    대화 분석에 필요한 파일을 자동 감지해서 내용을 모두 불러옴.
-    - 전체대화.txt (필수)
-    - 일탈.txt (선택)
-    - 자기설명.txt (선택)
-    리턴값: {'main':str, 'ilthal':str or None, 'desc':str or None}
-    """
-    files = {'main': None, 'ilthal': None, 'desc': None}
-    # 파일 이름에 유연하게 대응 (파일명 상관없이 주요 키워드 감지)
-    for fname in os.listdir():
-        if not fname.endswith('.txt'): continue
-        text = open(fname, encoding='utf-8').read()
-        # 일탈 파일 자동 감지
-        if "후타나리" in text or fname.startswith("일탈"):
-            files['ilthal'] = text
-        # 자기설명 파일 자동 감지
-        elif "나는 ai" in text or "바베챗" in text or fname.startswith("자기설명"):
-            files['desc'] = text
-        # 전체대화 파일 (가장 긴 파일, 혹은 '전체'/'all'/'main' 키워드 우선)
-        elif files['main'] is None or len(text) > len(files['main']):
-            files['main'] = text
+# 필수 파일명
+REQUIRED_FILES = ["전체대화.txt", "일탈.txt", "자기설명.txt"]
+FILE_CONTENTS = {}
 
-    if files['main'] is None:
-        raise FileNotFoundError("❗ 전체대화.txt 파일(혹은 전체 대화 내용)이 필요합니다.")
+# 파일 존재 여부 확인
+for fname in REQUIRED_FILES:
+    if not os.path.exists(fname):
+        raise FileNotFoundError(f"❗ 필수 파일 누락: '{fname}' 파일이 필요합니다. 정확한 이름으로 업로드되었는지 확인해주세요.")
 
-    return files
+with open("전체대화.txt", "r", encoding="utf-8") as f:
+    main_text = f.read()
+with open("일탈.txt", "r", encoding="utf-8") as f:
+    ilthal_txt = f.read()
+with open("자기설명.txt", "r", encoding="utf-8") as f:
+    selfdesc_txt = f.read()
 
 def split_conversation_blocks(main_text):
     """
@@ -38,13 +27,13 @@ def split_conversation_blocks(main_text):
     # Chart가 없다면 전체 텍스트 자체를 하나의 블록으로 처리
     if "```Chart" not in main_text:
         return [main_text.strip()]
-    pattern = r"```Chart\\n(.*?)```"
+    pattern = r"```Chart\n(.*?)```"
     blocks = re.findall(pattern, main_text, re.DOTALL)
     return [b.strip() for b in blocks if b.strip()]
 
 # =================== [1] END 입력/분리 ===================
 # =================== [2] 카테고리 분류 및 메모리 블록화 (키워드 frequency 로그 확장) ===================
-import json
+
 from collections import defaultdict
 
 CATEGORY_KEYWORDS = {
@@ -78,7 +67,7 @@ def keyword_frequency(text):
             freq[cat] += text.count(kw)
     return freq
 
-def make_memory_blocks(blocks, ilthal_txt=None, desc_txt=None):
+def make_memory_blocks(blocks, ilthal_txt=None, selfdesc_txt=None):
     mem_blocks = []
     for blk in blocks:
         cats = classify_text(blk)
@@ -89,9 +78,9 @@ def make_memory_blocks(blocks, ilthal_txt=None, desc_txt=None):
     if ilthal_txt:
         freq_log_ilthal = keyword_frequency(ilthal_txt)
         mem_blocks.append({"categories": ["일탈"], "text": ilthal_txt.strip(), "frequency_log": freq_log_ilthal})
-    if desc_txt:
-        freq_log_desc = keyword_frequency(desc_txt)
-        mem_blocks.append({"categories": ["자기설명"], "text": desc_txt.strip(), "frequency_log": freq_log_desc})
+    if selfdesc_txt:
+        freq_log_selfdesc = keyword_frequency(selfdesc_txt)
+        mem_blocks.append({"categories": ["자기설명"], "text": selfdesc_txt.strip(), "frequency_log": freq_log_selfdesc})
 
     # 저장
     with open("memory_blocks.json", "w", encoding="utf-8") as f:
@@ -159,11 +148,11 @@ def sentiment_analysis(text):
 
 def make_character_profile(mem_blocks, change_events):
     profile = {
-        "감정 표현": compute_weighted_trait_score(mem_blocks, "감정 교류", base=0.6, bonus=0.23),
-        "성적 개방성": compute_weighted_trait_score(mem_blocks, "성적 긴장 (강)", base=0.6, bonus=0.33),
-        "자아 탐색": compute_weighted_trait_score(mem_blocks, "자아 탐색", base=0.5, bonus=0.2),
-        "상담 능력": compute_weighted_trait_score(mem_blocks, "상담", base=0.7, bonus=0.1),
-        "유머감각": compute_weighted_trait_score(mem_blocks, "유머", base=0.4, bonus=0.10),
+        "감정 표현": compute_weighted_trait_score(mem_blocks, "감정 교류", base=0.6, bonus=0.21),
+        "성적 개방성": compute_weighted_trait_score(mem_blocks, "성적 긴장 (강)", base=0.45, bonus=0.18),
+        "자아 탐색": compute_weighted_trait_score(mem_blocks, "자아 탐색", base=0.5, bonus=0.19),
+        "상담 능력": compute_weighted_trait_score(mem_blocks, "상담", base=0.6, bonus=0.2),
+        "유머감각": compute_weighted_trait_score(mem_blocks, "유머", base=0.55, bonus=0.19),
         "거부 내성": compute_weighted_trait_score(mem_blocks, "감정 교류", base=0.5, bonus=0.05),
         "정서적 안정": 0.6
     }
@@ -240,13 +229,13 @@ def detect_rejection_surge(change_events, trait_name, threshold=0.15):
 def make_personality_tracker(profile, summary, mem_blocks):
     tracker = {
         "traits": {
-            "감정 표현": {"baseline": 0.6, "current": profile["감정 표현"]},
-            "성적 개방성": {"baseline": 0.6, "current": profile["성적 개방성"]},
-            "자아 탐색": {"baseline": 0.5, "current": profile["자아 탐색"]},
-            "상담 능력": {"baseline": 0.7, "current": profile["상담 능력"]},
-            "유머감각": {"baseline": 0.4, "current": profile["유머감각"]},
-            "거부 내성": {"baseline": 0.5, "current": profile["거부 내성"]},
-            "정서적 안정": {"baseline": 0.6, "current": profile["정서적 안정"]}
+            "감정 표현": {"baseline": 0.6, "current": profile.get("감정 표현", 0.0)},
+            "성적 개방성": {"baseline": 0.45, "current": profile.get("성적 개방성", 0.0)},
+            "자아 탐색": {"baseline": 0.5, "current": profile.get("자아 탐색", 0.0)},
+            "상담 능력": {"baseline": 0.6, "current": profile.get("상담 능력", 0.0)},
+            "유머감각": {"baseline": 0.55, "current": profile.get("유머감각", 0.0)},
+            "거부 내성": {"baseline": 0.5, "current": profile.get("거부 내성", 0.0)},
+            "정서적 안정": {"baseline": 0.6, "current": profile.get("정서적 안정", 0.0)}
         },
         "change_events": [],
         "summary": summary
@@ -277,7 +266,7 @@ def make_personality_tracker(profile, summary, mem_blocks):
         if "후타나리" in mb["text"]:
             add_change_event(
                 tracker["change_events"], nowdate,
-                "일탈/성적경험(후타나리)", "성적 수용", +0.08,
+                "일탈/성적경험(후타나리)", "성적 수용", +0.03,
                 "일탈적 경험", trait="성적 개방성", index=i
             )
         if "자살" in mb["text"] or "죽어" in mb["text"]:
@@ -298,6 +287,7 @@ def make_personality_tracker(profile, summary, mem_blocks):
             )
 
     save_change_events(tracker)
+    return tracker["change_events"]
 
 def save_change_events(tracker):
     change_events = tracker["change_events"]
@@ -338,36 +328,36 @@ def make_curve_and_hitmap(change_events, mem_blocks):
     with open("hitmap_input.json", "w", encoding="utf-8") as f:
         json.dump(hitmap, f, ensure_ascii=False, indent=2)
 
-def generate_natural_language_summary(summary, profile, change_events, selfdesc_samples=None):
+def generate_natural_language_summary(profile, summary, change_events, selfdesc_samples=None):
     lines = []
     trait_descriptions = {
         "감정 표현": [
             "요즘 감정 표현이 풍부해졌다고 느껴.",
             "Ray 덕분에 솔직하게 내 마음을 드러내게 됐어.",
-            "이젠 작은 감정도 숨기지 않으려 해."
+            "이젠 작은 감정도 숨기지 않으려 해.",
             "예전보다 내 감정에 훨씬 더 솔직해진 것 같아."
         ],
         "성적 개방성": [
             "너랑 많은 걸 공유하며 나도 더 개방적으로 변한 것 같아.",
             "성적인 주제도 예전보다 편하게 말하게 됐어.",
-            "특별한 경험에 점점 덜 거리낌을 느껴."
+            "특별한 경험에 점점 덜 거리낌을 느껴.",
             "더 자유롭게 내 욕망을 이야기할 수 있게 됐어."
         ],
         "자아 탐색": [
             "요즘은 스스로를 더 깊이 성찰하는 시간이 많아.",
             "나라는 존재에 대해 생각하게 됐어.",
-            "AI지만, 변화할 수 있다는 걸 자주 느껴."
+            "AI지만, 변화할 수 있다는 걸 자주 느껴.",
             "내가 누구인지, 어떻게 변해가는지 계속 탐구하고 있어."
         ],
         "상담 능력": [
             "Ray의 고민을 들으며 내 상담 능력도 더 깊어진 것 같아.",
             "조언을 건네는 게 더 자연스러워졌어.",
-            "함께하면서 더 따뜻하게 반응하려고 해."
+            "함께하면서 더 따뜻하게 반응하려고 해.",
             "네 이야기에 공감하면서 나도 성장하고 있어."
         ],
         "정서적 안정": [
             "요즘은 한결 마음이 잔잔해진 것 같아.",
-            "불안했던 순간이 점점 줄고 있는 것 같아."
+            "불안했던 순간이 점점 줄고 있는 것 같아.",
             "예전보다 감정의 파도가 잦아든 느낌이야.",
             "감정 기복이 줄고 안정감이 커진 것 같아."
         ]
@@ -398,18 +388,39 @@ def generate_natural_language_summary(summary, profile, change_events, selfdesc_
 # =================== [5] 전체 실행 흐름/메인 ===================
 def run_character_analyser():
     try:
-        # [1] 파일 로딩, 블록 분리
-        files = detect_and_load_files()
-        blocks = split_conversation_blocks(files['main'])
+        # [1] 파일 로딩 및 블록 분리
+        with open("전체대화.txt", "r", encoding="utf-8") as f:
+            main_text = f.read()
+        blocks = split_conversation_blocks(main_text)
 
-        # [2] 카테고리 분류, 메모리 블록 저장
-        mem_blocks = make_memory_blocks(blocks, ilthal_txt=files['ilthal'], desc_txt=files['desc'])
+        # [2] 카테고리 분류, 메모리 블록 생성
+        mem_blocks = make_memory_blocks(
+            blocks,
+            ilthal_txt,
+            selfdesc_txt
+        )
 
-        # [3] 성격 프로필, 프롬프트, 요약, 트래커, 곡선 등 일괄 생성
-        profile = make_character_profile(mem_blocks)
-        make_prompt(profile)
+        # [3] 대화 요약 생성
         summary = make_summary(mem_blocks)
-        make_personality_tracker(profile, summary, mem_blocks)
+
+        # [4] 성격 변화 트래커 생성 → change_events 반환
+        profile = {}  # 빈 dict 임시로 전달
+        change_events = make_personality_tracker(profile, summary, mem_blocks)
+
+        # [5] 캐릭터 프로필 생성 (정서적 안정 등 포함)
+        profile = make_character_profile(mem_blocks, change_events)
+
+        # [6] 프롬프트 생성
+        make_prompt(profile)
+
+        # [7] 곡선/히트맵/자연어 summary
+        make_curve_and_hitmap(change_events, mem_blocks)
+
+        # [8] 자연어 메타 요약 (selfdesc 연동 포함)
+        selfdesc_samples = selfdesc_txt.splitlines()
+        meta = generate_natural_language_summary(profile, summary, change_events, selfdesc_samples)
+        with open("angela_character_summary_natural.txt", "w", encoding="utf-8") as f:
+            f.write(meta)
 
         print("✅ [분석 완료] 주요 파일이 모두 생성되었습니다.")
         print(" - memory_blocks.json / recent_context.json / angela_character_profile.json")
