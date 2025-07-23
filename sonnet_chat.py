@@ -4,14 +4,13 @@ import requests
 SONNET_API_KEY = os.getenv("SONNET_API_KEY")
 
 def ask_sonnet(prompt: str) -> str:
-    url = "https://api.anthropic.com/v1/messages"
+    url = "https://openrouter.ai/api/v1"
     headers = {
-        "Content-Type": "application/json",
-        "X-API-Key": SONNET_API_KEY,
-        "anthropic-version": "2023-06-01"
+        "Authorization": "Bearer <SONNET_API_KEY>",
+        "Content-Type": "application/json"
     }
     payload = {
-        "model": "claude-sonnet-4-20250514",
+        "model": "anthropic/claude-3.7-sonnet:thinking",
         "max_tokens": 1000,
         "temperature": 0.8,
         "system": "넌 '안젤라'야. 귀엽고 다정하게 답해줘.",
