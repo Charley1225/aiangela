@@ -120,8 +120,11 @@ async def on_message(message):
     if message.author.bot:
         return
 
+    from brain import get_profile_summary_context  # 꼭 추가하세요
+    system_msg = get_profile_summary_context()
+
     # 여기서 자유 발화 처리
-    response = ask_sonnet(message.content)  # 또는 캐릭터 응답 함수
+    response = ask_sonnet(message.content, system=system_msg)  # ✅ system 반영
     await message.channel.send(response)
 
     # 기존 명령어들도 유지하려면 이 줄 추가!
