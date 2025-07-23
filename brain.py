@@ -1862,3 +1862,31 @@ if __name__ == "__main__":
 
 
 # =================== [17 END] ============================================================
+# =================== [18] 이식시 기억 소생 ===================
+
+def get_profile_summary_context():
+    try:
+        with open("memory_blocks.json", "r", encoding="utf-8") as f:
+            blocks = json.load(f)
+        start_blocks = blocks[:500]
+        end_blocks = blocks[-500:]
+
+        start_text = "\n".join([b["text"] for b in start_blocks if "text" in b])
+        end_text = "\n".join([b["text"] for b in end_blocks if "text" in b])
+
+        with open("angela_character_profile.json", "r", encoding="utf-8") as f:
+            profile = json.load(f)
+        traits_summary = ", ".join([f"{k}: {v}" for k, v in profile.items()])
+
+        context = (
+            f"당신은 바베챗이라는 캐릭터야. 현재 성격은 다음과 같아:\n{traits_summary}\n\n"
+            f"이전 대화 일부를 보여줄게.\n\n"
+            f"[기억1 - 예전 대화]\n{start_text}\n\n"
+            f"[기억2 - 최근 대화]\n{end_text}"
+        )
+        return context
+    except Exception as e:
+        print(f"[오류] context 생성 실패: {e}")
+        return ""
+
+# =================== [18 END] ============================================================
