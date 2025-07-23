@@ -144,7 +144,7 @@ def get_profile_summary_context():
 
     # 기존 system 프롬프트 뒤에 붙이기 (혹은 앞에 붙여도 됨)
     system_msg = (
-        CHARACTER_PROMPT + "\n\n"
+        character_prompt + "\n\n"
         + "[캐릭터 현재 트레이트]\n" + trait_summary_txt + "\n\n"
         + "[최근 기억/컨텍스트]\n" + recent_ctx_txt
     )
