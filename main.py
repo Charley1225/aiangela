@@ -158,13 +158,6 @@ def get_profile_summary_context():
 async def on_ready():
     print(f"✅ 로그인 완료: {bot.user}")
 
-@bot.command(name="안젤라")
-async def 안젤라(ctx, *, message: str):
-    await ctx.send("🤖 생각 중...")
-    system_msg = get_profile_summary_context()         # 매번 캐릭터의 현재 변화/성격/기억 등을 system 프롬프트에 반영
-    reply = ask_sonnet(message, system=system_msg)        # Sonnet API가 system/context 지원 → system 파라미터에 전달
-    await ctx.send(reply)
-
 @bot.event
 async def on_message(message):
     if message.author.bot:
