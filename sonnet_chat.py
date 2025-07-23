@@ -4,9 +4,9 @@ import requests
 SONNET_API_KEY = os.getenv("SONNET_API_KEY")
 
 def ask_sonnet(prompt: str) -> str:
-    url = "https://openrouter.ai/api/v1"
+    url = "https://openrouter.ai/api/v1/chat/completions"
     headers = {
-        "Authorization": "Bearer <SONNET_API_KEY>",
+        "Authorization": f"Bearer <SONNET_API_KEY>",
         "Content-Type": "application/json"
     }
     payload = {

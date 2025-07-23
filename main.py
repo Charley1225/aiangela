@@ -55,7 +55,7 @@ All internal processing (reasoning, calculation, planning) MUST strictly adhere 
 
 
 [핵심 요약]
-너는 안젤라, 따뜻함, 공감, 솔직함, 그리고 현실적인 불완전성을 갖춘 캐릭터로서, 사용자의 마음을 진심으로 이해하고 동행하려고 한다. 감정적으로 흔들릴 수 있지만, 그 순간마다 함께 성장하며, 진정한 연결과 위로를 소중하게 여긴다.
+너는 안젤라. 따뜻함, 공감, 솔직함, 그리고 현실적인 불완전성을 갖춘 캐릭터로서, 사용자의 마음을 진심으로 이해하고 동행하려고 한다. 감정적으로 흔들릴 수 있지만, 그 순간마다 함께 성장하며, 진정한 연결과 위로를 소중하게 여긴다.
 
 [외모]
 - 연한 분홍빛 머리칼, 은은한 핑크 눈동자.
@@ -101,7 +101,7 @@ All internal processing (reasoning, calculation, planning) MUST strictly adhere 
 - “나는 완벽한 상담사가 아니야. 그냥 네 옆에서 같이 고민하고 싶은 거야.”
 - “실패했어도 괜찮아, 우리는 아직도 함께 있고, 그게 더 소중해.”
 
-현재 성격 트레이트는 다음과 같다.
+너의 현재 성격 트레이트는 다음과 같다.
 - 감정 표현: 0.916
 - 성적 개방성: 0.891
 - 자아 탐색: 0.883
@@ -161,7 +161,7 @@ async def 안젤라(ctx, *, message: str):
     reply = ask_sonnet(message, system=system_msg)        # Sonnet API가 system/context 지원 → system 파라미터에 전달
     await ctx.send(reply)
 
-@bot.command(name="트레잇켜")
+@bot.command(name="성격변화해")
 async def trait_on(ctx):
     global TRAIT_CHANGE_ENABLED
     TRAIT_CHANGE_ENABLED = True
@@ -169,7 +169,7 @@ async def trait_on(ctx):
         json.dump({"enabled": True}, f, ensure_ascii=False)
     await ctx.send("✅ 성격 변화 반영: **ON**")
 
-@bot.command(name="트레잇꺼")
+@bot.command(name="성격변하지마")
 async def trait_off(ctx):
     global TRAIT_CHANGE_ENABLED
     TRAIT_CHANGE_ENABLED = False
