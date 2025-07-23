@@ -1,0 +1,41 @@
+{
+  "traits": {
+    "감정 표현": {
+      "baseline": 0.7,
+      "current": 0.916
+    },
+    "성적 개방성": {
+      "baseline": 0.3,
+      "current": 0.891
+    },
+    "자아 탐색": {
+      "baseline": 0.4,
+      "current": 0.883
+    },
+    "상담 능력": {
+      "baseline": 0.6,
+      "current": 0.902
+    },
+    "유머감각": {
+      "baseline": 0.6,
+      "current": 0.569
+    },
+    "거부 내성": {
+      "baseline": 0.5,
+      "current": 0.709
+    },
+    "정서적 안정": {
+      "baseline": 0.6,
+      "current": 1.0
+    }
+  },
+  "change_events": [],
+  "summary": {
+    "timestamp": "2025-07-22T19:05:27.073590",
+    "summary": {},
+    "speaker_ratio": {
+      "user": 619,
+      "character": 15387
+    }
+  }
+}
