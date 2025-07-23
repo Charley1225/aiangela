@@ -69,7 +69,7 @@ def record_change_event(source_text: str,
 
 def detect_emotion(text: str, is_user: bool = True) -> str:
     """입력 텍스트에서 감정 태깅 (유머, 성적 욕구 포함), Sonnet 우선 사용"""
-    SONNET_API_KEY = os.getenv("SONNET_API_KEY")
+    api_key = os.getenv("SONNET_API_KEY")
     if api_key:
         prompt = (
             "다음 문장은 사용자의 말이야. 여기서 느껴지는 가장 강한 감정을 하나만 골라줘. "
@@ -88,19 +88,19 @@ def detect_emotion(text: str, is_user: bool = True) -> str:
             "temperature": 0.3,
         }
         headers = {
-            "Authorization": "Bearer <SONNET_API_KEY>",
+            "Authorization": f"Bearer {api_key}",
             "Content-Type": "application/json"
         }
         try:
             response = requests.post(
-                url = "https://openrouter.ai/api/v1",
+                url = "https://openrouter.ai/api/v1/chat/completions",
                 headers=headers,
                 json=payload,
                 timeout=10
             )
             response.raise_for_status()
             result = response.json()
-            emotion = result["content"][0]["text"].strip().replace(".", "").replace(" ", "")
+            emotion = result["choices"][0]["message"]["content"].strip().replace(".", "").replace(" ", "")
             allowed_emotions = [
                 "행복", "슬픔", "분노", "불안", "유머", "성적 욕구", "상담", "자아", "중립"
             ]
@@ -218,9 +218,9 @@ def store_memory(self,
             baseline = traits[trait]["baseline"]
             current = traits[trait]["current"]
             if speaker == "character":
-                adjusted_delta = change * 0.1
+                adjusted_delta = change * 0.05
             else:
-                adjusted_delta = change * 0.5
+                adjusted_delta = change * 0.15
             updated = max(baseline, min(2.0, current + adjusted_delta))
             traits[trait]["current"] = updated
 
@@ -337,10 +337,14 @@ def summarize_change_events(change_log_file="change_events.jsonl",
                             archive_threshold=100,
                             archive_dir="archives",
                             summary_file="change_summary.jsonl"):
-    """change_events.jsonl이 일정 수 이상이면 최근 3/7/15일 중 가장 짧은 유효 구간을 요약 후 아카이브"""
+    """
+    change_events.jsonl이 일정 수 이상이면 최근 3/7/15일 중 가장 짧은 유효 구간을 요약 후 아카이브
+    """
+    if not os.path.exists(archive_dir):
+        os.makedirs(archive_dir)
 
     from collections import defaultdict, Counter
-    from datetime import datetime, timedelta
+    from datetime import timedelta
 
     if not os.path.exists(change_log_file):
         return
@@ -445,48 +449,39 @@ def summarize_change_events(change_log_file="change_events.jsonl",
 
 # =================== [4 END] =================================================# =================== [5] 감정 누적 경향 분석 + 변화 이벤트 기록 ===================
 
-from datetime import datetime
+# [1] 임계치 동적 계산 함수
+def calc_dynamic_thresholds(memory_file="memory_blocks.json"):
+    if not os.path.exists(memory_file):
+        return {}
+    with open(memory_file, "r", encoding="utf-8") as f:
+        memories = json.load(f)
+    now = datetime.now()
+    fourteen_days_ago = now - timedelta(days=14)
+    recent_14d = [mb for mb in memories if "timestamp" in mb and datetime.fromisoformat(mb["timestamp"]) > fourteen_days_ago]
+    emotion_counts = Counter(mb.get("emotion", "중립") for mb in recent_14d)
+    thresholds = {}
+    for emotion, total in emotion_counts.items():
+        daily_avg = total / 14
+        thresholds[emotion] = int(daily_avg * 1.3) + 1
+    for default in ["슬픔", "불안", "분노", "행복", "상담", "자아", "유머", "성적 욕구"]:
+        if default not in thresholds:
+            thresholds[default] = 3
+    return thresholds
 
-now = datetime.now()
-hour = now.hour
-
-def analyze_emotion_trends(memory_file="memory_blocks.json",
-                            tracker_file="personality_adaptation_tracker.json",
-                            thresholds=None,
-                            emotion_to_traits=None):
-    """memory_blocks.json 내 감정 누적 경향을 분석해 성격 변화 반영 및 기록"""
-
-    from collections import Counter
-
-    # 기본 임계치: 감정별 출현 횟수 기준
-    if thresholds is None:
-        thresholds = {
-            "슬픔": 5,
-            "불안": 5,
-            "분노": 5,
-            "행복": 5,
-            "상담": 6,
-            "자아": 6,
-            "유머": 4,
-            "성적 욕구": 5
-        }
-
-    # 데이터 불러오기
+# [2] 최근 7일치 감정+스피커 누적 분석
+def analyze_recent_7days(memory_file="memory_blocks.json", tracker_file="personality_adaptation_tracker.json", thresholds=None, emotion_to_traits=None, start_time=None):
     if not os.path.exists(memory_file):
         return
     with open(memory_file, "r", encoding="utf-8") as f:
         memories = json.load(f)
-
-    if not memories:
+    now = datetime.now()
+    seven_days_ago = now - timedelta(days=7)
+    recent = [mb for mb in memories if "timestamp" in mb and datetime.fromisoformat(mb["timestamp"]) > seven_days_ago]
+    if not recent:
         return
 
-    # ✅ memory_blocks 압축 실행
-    from memory_compression import compress_memory_blocks  # 블록 17의 함수
-    compress_memory_blocks(memory_file=memory_file)
-
-    # 최근 100건 감정 + speaker 분석
-    recent = memories[-100:]
-    combo_counts = Counter((mem.get("emotion", "중립"), mem.get("speaker", "user")) for mem in recent)
+    # 최근 7일치만 combo_counts로 집계
+    combo_counts = Counter((mb.get("emotion", "중립"), mb.get("speaker", "user")) for mb in recent)
 
     # 성격 데이터 불러오기
     if os.path.exists(tracker_file):
@@ -496,13 +491,14 @@ def analyze_emotion_trends(memory_file="memory_blocks.json",
         traits = {}
 
     changed = False
+    if not thresholds or not emotion_to_traits:
+        return
 
     if not TRAIT_CHANGE_ENABLED:
-        return  # 트레잇 변화 비활성화 시 바로 종료
+        return
 
     for (emotion, speaker), count in combo_counts.items():
         if emotion in thresholds and count >= thresholds[emotion]:
-            # 🔸 감정 누적량 기반 감쇠율 적용
             decay_factor = 1.0
             if count > thresholds[emotion] + 5:
                 decay_factor = 0.2
@@ -511,7 +507,7 @@ def analyze_emotion_trends(memory_file="memory_blocks.json",
 
             for trait, delta in emotion_to_traits.get(emotion, []):
                 time_weight = get_time_based_trait_weight(trait, datetime.now().hour)
-                speaker_weight = 0.2 if speaker == "character" else 1.0
+                speaker_weight = 0.1 if speaker == "character" else 0.5
                 adjusted = delta * time_weight * speaker_weight * decay_factor
 
                 if trait not in traits:
@@ -523,13 +519,13 @@ def analyze_emotion_trends(memory_file="memory_blocks.json",
                 traits[trait]["current"] = updated
                 changed = True
 
-                # 변화 이벤트 기록 (speaker 정보는 source_text로만 우회 저장됨)
+                # 변화 이벤트 기록
                 record_change_event(
                     source_text=f"[누적 감정 분석] 최근 {speaker}의 {emotion} {count}회",
                     emotion=emotion,
                     trait=trait,
                     delta=delta,
-                    speaker=speaker,  # 🔹 추가
+                    speaker=speaker,
                     tracker_file=tracker_file
                 )
 
@@ -547,9 +543,58 @@ def analyze_emotion_trends(memory_file="memory_blocks.json",
     if changed:
         with open(tracker_file, "w", encoding="utf-8") as f:
             json.dump(traits, f, ensure_ascii=False, indent=2)
-
-        # 변화 요약 자동화
         summarize_change_events()
+
+
+# [3] 8시간마다 실행하는 최근 7일치 감정 분석 (Render 등 24시간 환경 가정)
+
+try:
+    import schedule
+except ImportError:
+    import subprocess
+    import sys
+    subprocess.check_call([sys.executable, "-m", "pip", "install", "schedule"])
+    import schedule
+
+import time
+from datetime import datetime, timedelta
+from collections import Counter  
+
+# ✅ 트레잇 변화 허용 여부 스위치
+TRAIT_CHANGE_ENABLED = True
+
+# ✅ 최근 7일치만 필터링해서 분석
+def run_analyze_recent_7days():
+    if not TRAIT_CHANGE_ENABLED:
+        print("[스킵됨] 트레잇 변화 비활성화됨.")
+        return
+
+    try:
+        thresholds = calc_dynamic_thresholds("memory_blocks.json")
+
+        # ✅ 7일 전 날짜 계산
+        seven_days_ago = (datetime.now() - timedelta(days=7)).isoformat()
+
+        analyze_recent_7days(
+            memory_file="memory_blocks.json",
+            tracker_file="personality_adaptation_tracker.json",
+            thresholds=thresholds,
+            start_time=seven_days_ago  # ✅ 필터 기준 추가
+        )
+        print("[성공] 최근 7일치 analyze_recent_7days 실행 완료")
+    except Exception as e:
+        print(f"[오류] analyze_recent_7days 실행 중 오류 발생: {e}")
+
+# ✅ 8시간마다 스케줄링
+schedule.every(8).hours.do(run_analyze_recent_7days)
+
+# ✅ 루프 시작
+if __name__ == "__main__":
+    print("[시작됨] 8시간마다 최근 7일 분석 실행")
+    run_analyze_recent_7days()  # 즉시 1회 실행
+    while True:
+        schedule.run_pending()
+        time.sleep(1)
 
 # =================== [5 END] ============================================================
 # =================== [6] 회고 기반 반응 생성기 ===================
@@ -716,8 +761,6 @@ def get_response_style(traits: dict,
 
 # =================== [7 END] ============================================================
 # =================== [8] 자리 비움 인식 및 시간대별 반응 생성 ===================
-
-from datetime import timedelta
 
 def get_idle_reaction(traits: dict,
                       timestamp_file: str = "last_interaction_timestamp.json",
@@ -1716,17 +1759,12 @@ def update_feedback_tracker(feedback_file: str = "feedback_tracker.json",
 # =================== [17] 메모리 압축 및 요약 기능 ===================
 
 def summarize_with_sonnet(text: str, max_tokens: int = 100) -> str:
-    """
-    Sonnet 3.7 API를 사용해 텍스트 요약 (프롬프트 포함)
-    """
     api_key = os.getenv("SONNET_API_KEY")
     if not api_key:
-        return text[:50] + "..."  # 대체 요약
-
+        return text[:50] + "..."
     system_prompt = "너는 감성적인 챗봇이야. 주어진 사용자의 발화를 1문장으로 요약해줘. 중요한 감정이나 분위기나 키워드를 담아야 해."
-
     payload = {
-        "model": "claude-3-7-sonnet-20250219",  # 또는 정확한 3.7 ID
+        "model": "anthropic/claude-3.7-sonnet:thinking",
         "messages": [
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": text}
@@ -1734,49 +1772,44 @@ def summarize_with_sonnet(text: str, max_tokens: int = 100) -> str:
         "max_tokens": max_tokens,
         "temperature": 0.7,
     }
-
     headers = {
-        "x-api-key": api_key,  # Anthropic 헤더 형식
+        "Authorization": f"Bearer {api_key}", 
         "Content-Type": "application/json",
-        "anthropic-version": "2023-06-01"  # API 버전 필수
     }
-
     try:
         response = requests.post(
-            "https://api.anthropic.com/v1/messages",
+            "https://openrouter.ai/api/v1/chat/completions",
             headers=headers,
             json=payload,
             timeout=10
         )
         response.raise_for_status()
-        
         result = response.json()
-        return result["content"][0]["text"]
-        
+        # openrouter는 응답 구조가 다를 수 있음, 실제 구조에 맞게 수정 필요
+        if "choices" in result and result["choices"]:
+            return result["choices"][0]["message"]["content"].strip()
+        else:
+            return text[:50] + "..."
     except Exception as e:
-        print(f"API 요청 실패: {e}")
+        print(f"[요약 실패] Sonnet 요약 API 오류: {e}")
         return text[:50] + "..."
 
-def compress_memory_blocks(memory_file="memory_blocks.json",
-                           compressed_file="compressed_memories.json",
-                           threshold=300,
-                           retain=150):
+def compress_memory_blocks_date_based(memory_file="memory_blocks.json",
+                                      compressed_file="compressed_memory_blocks.json",
+                                      keep_days=15):
     """
-    memory_blocks.json이 threshold 초과 시 오래된 항목을 Sonnet으로 요약 후 압축 저장
-    retain 개수만 남기고 나머지 요약
+    memory_blocks.json에서 가장 최근 15일 기록만 남기고,
+    이전 기록은 요약/압축해서 별도 파일(compressed_file)에 저장
     """
     if not os.path.exists(memory_file):
         return
-
     with open(memory_file, "r", encoding="utf-8") as f:
-        memories = json.load(f)
-
-    if len(memories) <= threshold:
-        return  # 압축 조건 미충족
-
-    to_compress = memories[:-retain]
-    to_retain = memories[-retain:]
-
+        data = json.load(f)
+    now = datetime.now()
+    threshold_date = now - timedelta(days=keep_days)
+    to_retain = [mb for mb in data if "timestamp" in mb and datetime.fromisoformat(mb["timestamp"]) > threshold_date]
+    to_compress = [mb for mb in data if "timestamp" in mb and datetime.fromisoformat(mb["timestamp"]) <= threshold_date]
+    # 요약 및 압축
     compressed = []
     for entry in to_compress:
         text = entry.get("text", "")
@@ -1788,19 +1821,44 @@ def compress_memory_blocks(memory_file="memory_blocks.json",
             "original_timestamp": entry.get("timestamp", ""),
             "compressed_at": datetime.now().isoformat()
         })
-
     # 기존 압축 파일과 병합
     if os.path.exists(compressed_file):
         with open(compressed_file, "r", encoding="utf-8") as f:
             prev = json.load(f)
     else:
         prev = []
-
     with open(compressed_file, "w", encoding="utf-8") as f:
         json.dump(prev + compressed, f, ensure_ascii=False, indent=2)
-
     # memory_blocks 최신 상태로 덮어쓰기
     with open(memory_file, "w", encoding="utf-8") as f:
         json.dump(to_retain, f, ensure_ascii=False, indent=2)
+
+import schedule
+import time
+from datetime import datetime
+
+# ✅ 감싸는 함수 정의
+def scheduled_compression():
+    try:
+        compress_memory_blocks_date_based(
+            memory_file="memory_blocks.json",
+            compressed_file="compressed_memory_blocks.json",
+            keep_days=15
+        )
+        print(f"[성공] 메모리 블록 압축 완료: {datetime.now().isoformat()}")
+    except Exception as e:
+        print(f"[오류] 메모리 블록 압축 중 예외 발생: {e}")
+
+# ✅ 30일마다 실행 등록
+schedule.every(30).days.do(scheduled_compression)
+
+# ✅ 루프
+if __name__ == "__main__":
+    print("[시작됨] 30일마다 메모리 블록 압축")
+    # scheduled_compression()  # 시작 직후 1회 실행 (선택)
+    while True:
+        schedule.run_pending()
+        time.sleep(1)
+
 
 # =================== [17 END] ============================================================
