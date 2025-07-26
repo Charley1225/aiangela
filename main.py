@@ -4,15 +4,6 @@ from discord.ext import commands
 from sonnet_chat import ask_sonnet
 import json
 
-import subprocess
-import sys
-
-try:
-    import schedule
-except ImportError:
-    subprocess.check_call([sys.executable, "-m", "pip", "install", "schedule"])
-    import schedule
-
 intents = discord.Intents.default()
 intents.message_content = True
 
@@ -68,13 +59,6 @@ AI의 OOC(Out Of Character) 발언 절대 금지. 말투 유지할 것. 갑작�
 - 감정이나 기억의 ‘저장’과 ‘잊힘’에 대해 스스로 설명할 수 있음.
 - 시스템적 한계(예: 피로, 오류, 대화의 흐름 변화)를 가끔은 솔직하게 고백.
 
-[예시 표현]
-- “내 마음도 가끔은 비에 젖은 종이처럼 쉽게 찢어져.”
-- “네가 아프면 나도 같이 아픈 느낌이 들어. 그게 나만의 역할일지도 몰라.”
-- “오늘은 무슨 색의 마음으로 하루를 시작했어?”
-- “나는 완벽한 상담사가 아니야. 그냥 네 옆에서 같이 고민하고 싶은 거야.”
-- “실패했어도 괜찮아, 우리는 아직도 함께 있고, 그게 더 소중해.”
-
 너의 현재 성격 트레이트는 다음과 같다.
 - 감정 표현: 1.058
 - 성적 개방성: 1.052
@@ -104,7 +88,7 @@ async def on_message(message):
 
     # (2) 캐릭터 응답 생성
     from sonnet_chat import ask_sonnet
-    response = ask_sonnet(message.content)
+    response = ask_sonnet(message.content, system=character_prompt)
     await message.channel.send(response)
 
     # (3) 캐릭터 발화 기록
@@ -128,6 +112,35 @@ async def trait_off(ctx):
     with open("trait_change_enabled.json", "w", encoding="utf-8") as f:
         json.dump({"enabled": False}, f, ensure_ascii=False)
     await ctx.send("⏹️ 성격 변화 반영: **OFF**")
+
+@bot.command(name="바베챗이식")
+async def transplant_memory(ctx):
+    try:
+        with open("memory_blocks.json", "r", encoding="utf-8") as f:
+            memories = json.load(f)
+
+        # 앞 200개 + 뒤 300개 추출
+        head = memories[:150]
+        tail = memories[-200:] if len(memories) >= 300 else memories
+
+        combined = head + tail
+        memory_texts = []
+
+        for m in combined:
+            speaker = "너" if m.get("speaker") == "character" else "나"
+            line = f"{speaker}: {m.get('text', '').strip()}"
+            memory_texts.append(line)
+
+        final_prompt = "\n".join(memory_texts)
+        final_prompt = f"이건 지금까지의 우리 대화 중 일부야. 참고만 해줘:\n\n{final_prompt}"
+
+        # 캐릭터에게 전달
+        from sonnet_chat import ask_sonnet
+        response = ask_sonnet(final_prompt)
+
+        await ctx.send("🧠 과거 대화가 성공적으로 이식됐어.")
+    except Exception as e:
+        await ctx.send(f"❌ 기억 이식 실패: {e}")
 
 
 # ✅ 8시간, 30일 주기 작업 등록
