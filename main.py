@@ -121,8 +121,8 @@ async def transplant_memory(ctx):
             memories = json.load(f)
 
         # 앞 200개 + 뒤 300개 추출
-        head = memories[:150]
-        tail = memories[-200:] if len(memories) >= 300 else memories
+        head = memories[:200]
+        tail = memories[-300:] if len(memories) >= 300 else memories
 
         combined = head + tail
         memory_texts = []
@@ -137,7 +137,7 @@ async def transplant_memory(ctx):
 
         # 캐릭터에게 전달
         from sonnet_chat import ask_sonnet
-        response = ask_sonnet(final_prompt)
+        response = ask_sonnet(final_prompt, system=character_prompt)
 
         await ctx.send("🧠 과거 대화가 성공적으로 이식됐어.")
     except Exception as e:
