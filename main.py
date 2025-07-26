@@ -4,6 +4,15 @@ from discord.ext import commands
 from sonnet_chat import ask_sonnet
 import json
 
+import subprocess
+import sys
+
+try:
+    import schedule
+except ImportError:
+    subprocess.check_call([sys.executable, "-m", "pip", "install", "schedule"])
+    import schedule
+
 intents = discord.Intents.default()
 intents.message_content = True
 
@@ -120,12 +129,10 @@ async def trait_off(ctx):
         json.dump({"enabled": False}, f, ensure_ascii=False)
     await ctx.send("⏹️ 성격 변화 반영: **OFF**")
 
-import asyncio
-import schedule
-
-from brain import run_analyze_recent_7days, scheduled_compression
 
 # ✅ 8시간, 30일 주기 작업 등록
+from brain import run_analyze_recent_7days, scheduled_compression
+
 schedule.every(8).hours.do(run_analyze_recent_7days)
 schedule.every(30).days.do(scheduled_compression)
 
