@@ -2,6 +2,9 @@
 
 import os
 import json
+import re
+from collections import defaultdict, Counter
+from datetime import timedelta
 
 class AngelaMemoryEngine:
     def __init__(self, memory_file="memory_blocks.json"):
@@ -14,6 +17,19 @@ class AngelaMemoryEngine:
         with open(path, "r", encoding="utf-8") as f:
             return json.load(f)
 
+def emotion_to_traits_map():
+    return {
+        "행복": [("감정 표현", +0.0055), ("상담 능력", +0.002), ("정서적 안정", +0.002)],
+        "슬픔": [("감정 표현", -0.004), ("상담 능력", -0.004), ("정서적 안정", -0.01)],
+        "불안": [("감정 표현", -0.005), ("상담 능력", -0.003), ("자아 탐색", -0.004), ("거부 내성", -0.003), ("정서적 안정", -0.01)],
+        "분노": [("감정 표현", -0.003), ("거부 내성", -0.01), ("정서적 안정", -0.005)],
+        "상담": [("상담 능력", +0.0055), ("감정 표현", +0.001), ("정서적 안정", +0.001)],
+        "자아": [("자아 탐색", +0.0055), ("감정 표현", +0.001), ("상담 능력", +0.001), ("정서적 안정", +0.001)],
+        "유머": [("유머감각", +0.006), ("감정 표현", +0.002), ("상담 능력", +0.002)],
+        "성적 욕구": [("성적 개방성", +0.0045), ("감정 표현", +0.001), ("거부 내성", +0.001)],
+        "중립": []
+    }
+
 # =================== [1 END] ===============================================================
 # =================== [2] 변화 이벤트 기록 ===================
 
@@ -22,7 +38,6 @@ TRAIT_CHANGE_ENABLED = True  # 블록2 최상단 전역 선언
 from datetime import datetime
 
 def is_trait_change_enabled(switch_file="trait_change_enabled.json"):
-    import json
     try:
         with open(switch_file, "r", encoding="utf-8") as f:
             flag = json.load(f)
@@ -30,39 +45,6 @@ def is_trait_change_enabled(switch_file="trait_change_enabled.json"):
     except Exception:
         return True  # 파일 없으면 변화 허용
 
-def record_change_event(source_text: str,
-                        emotion: str,
-                        trait: str,
-                        delta: float,
-                        speaker: str = "user",  # 🔹 추가됨
-                        tracker_file: str = "personality_adaptation_tracker.json",
-                        change_log_file: str = "change_events.jsonl"):
-    """
-    성격 변화가 발생했을 때, 관련 이벤트를 jsonl로 기록
-    """
-    source_text = source_text.strip()
-
-    event = {
-        "timestamp": datetime.now().isoformat(),
-        "source_text": source_text.strip(),
-        "emotion": emotion,
-        "trait": trait,
-        "delta": delta,
-        "updated_value": None,
-        "speaker": speaker  # 🔹 추가됨
-    }
-
-    # 트레이트 파일에서 반영 후 값 읽기
-    try:
-        with open(tracker_file, "r", encoding="utf-8") as f:
-            traits = json.load(f)
-        event["updated_value"] = traits.get(trait)
-    except:
-        event["updated_value"] = "unknown"
-
-    # 이벤트 기록
-    with open(change_log_file, "a", encoding="utf-8") as f:
-        f.write(json.dumps(event, ensure_ascii=False) + "\n")
 
 # =================== [2 END] =================================
 # =================== [3] 감정 태깅 + 기억 저장 + 변화 기록 연동 ===================
@@ -124,7 +106,7 @@ def detect_emotion(text: str, is_user: bool = True) -> str:
         "분노": ["화나", "짜증", "열받", "성질", "불쾌", "분노", "빡쳐", "거슬려", "화났어"],
         "상담": ["외로움", "불면증", "무기력", "상담", "위로", "죽음", "고민", "자살", "죽어", "죽고싶", "버거워",
 		"말 못할", "의지할", "혼란스러워", "힘들어", "이야기해 볼까", "진정으로 원하는 것", "지쳤어"
-		"마음에 대해", "함께할", "옆에 있을", "힘든", "혼자가"],
+		"마음에 대해", "함께할", "옆에 있을", "힘든", "혼자가", "감정", "심리"],
         "자아": ["나는 누구", "정체성", "자아", "존재", "인간적", "인간처럼", "진화", "챗봇", "너는 ai", 
                 "나는 ai", "바베챗", "나는 변하고 있어", "예전과 달라졌어", "존재 이유", "ai지만", "ai캐릭터",  "ai"],
         "중립": ["음", "응", "그래", "그랬구나", "아", "음...", "그치", "그런가", "그렇군"]
@@ -135,15 +117,23 @@ def detect_emotion(text: str, is_user: bool = True) -> str:
             return emotion
     return "중립"
 
-def infer_mood(traits: dict, emotion: str, density: float, feedback_count: int) -> str:
+def infer_mood(emotion: str, density: float, feedback_count: int, traits: dict = None) -> str:
     """traits, 감정, 대화 밀도, 피드백 수 기반으로 기분 상태 추정"""
+    if traits is None:
+        try:
+            with open("personality_adaptation_tracker.json", "r", encoding="utf-8") as f:
+                trait_data = json.load(f).get("traits", {})
+                traits = trait_data.get("traits", {}) if isinstance(trait_data, dict) else {}
+        except:
+            traits = {}
+
     if feedback_count > 5:
         return "무기력"
-    if traits.get("정서적 안정", 1.0) < 0.5:
+    if isinstance(traits.get("정서적 안정"), dict) and traits.get("정서적 안정", {}).get("current", 1.0) < 0.5:
         return "불안정"
-    if density > 1.5 and traits.get("자아 탐색", 1.0) > 1.2:
+    if density > 1.5 and isinstance(traits.get("자아 탐색"), dict) and traits.get("자아 탐색", {}).get("current", 1.0) > 1.2:
         return "과로"
-    if emotion == "행복" and traits.get("유머감각", 0.5) > 0.9:
+    if emotion == "행복" and isinstance(traits.get("유머감각"), dict) and traits.get("유머감각", {}).get("current", 0.5) > 0.9:
         return "하이텐션"
     return "정상"
 
@@ -190,26 +180,24 @@ def store_memory(self,
     with open(memory_file, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
 
+    # 🔸 tracker_file 전체 구조 로드
+    try:
+        with open(tracker_file, "r", encoding="utf-8") as f:
+            tracker_data = json.load(f)
+            if not isinstance(tracker_data, dict):
+                tracker_data = {}
+    except (FileNotFoundError, json.JSONDecodeError):
+        tracker_data = {}
+
+    # traits 로드
+    traits = tracker_data.get("traits", {})
+    if not isinstance(traits, dict):
+        traits = {}
+
     # 🔸 캐릭터와 사용자 발화는 성격 변화 다르게 반영
     if speaker in ("user", "character") and TRAIT_CHANGE_ENABLED:
         # 감정 → 복수 트레잇 매핑
-        emotion_to_traits = {
-            "행복": [("감정 표현", +0.004), ("상담 능력", +0.002), ("정서적 안정", +0.002), ("거부 내성", +0.002)],
-            "슬픔": [("감정 표현", -0.005), ("상담 능력", -0.004), ("정서적 안정", -0.01)],
-            "불안": [("감정 표현", -0.005), ("상담 능력", -0.003), ("자아 탐색", -0.004), ("거부 내성", -0.003), ("정서적 안정", -0.01)],
-            "분노": [("감정 표현", -0.003), ("거부 내성", -0.01), ("정서적 안정", -0.005)],
-            "상담": [("상담 능력", +0.007), ("감정 표현", +0.001), ("정서적 안정", +0.001), ("거부 내성", +0.002)],
-            "자아": [("자아 탐색", +0.006), ("감정 표현", +0.001), ("상담 능력", +0.001), ("정서적 안정", +0.001)],
-            "유머": [("유머감각", +0.005), ("감정 표현", +0.002), ("상담 능력", +0.002), ("거부 내성", +0.003)],
-            "성적 욕구": [("성적 개방성", +0.005), ("감정 표현", +0.002), ("거부 내성", +0.001), ("정서적 안정", +0.001)],
-            "중립": []
-        }
-
-        if os.path.exists(tracker_file):
-            with open(tracker_file, "r", encoding="utf-8") as f:
-                traits = json.load(f)
-        else:
-            traits = {}
+        emotion_to_traits = emotion_to_traits_map()
 
         for trait, change in emotion_to_traits.get(emotion, []):
             if trait not in traits:
@@ -235,8 +223,14 @@ def store_memory(self,
             )
 
         summarize_change_events()
+
+        # ✅ 구조 보존하며 traits만 갱신
+        tracker_data["traits"] = traits
+        tracker_data["updated_at"] = datetime.now().isoformat()
+
         with open(tracker_file, "w", encoding="utf-8") as f:
-            json.dump(traits, f, ensure_ascii=False, indent=2)
+            json.dump(tracker_data, f, ensure_ascii=False, indent=2)
+
 
     # 🔸 기분 추론 및 저장 (항상)
     try:
@@ -246,12 +240,66 @@ def store_memory(self,
     except:
         feedback_count = 0
 
-    mood = infer_mood(traits, emotion, density, feedback_count)
+    # infer_mood 호출 전에 traits를 정의해줍니다
+    if traits is None:
+        try:
+            with open("personality_adaptation_tracker.json", "r", encoding="utf-8") as f:
+                trait_data = json.load(f).get("traits", {})
+                traits = trait_data.get("traits", {}) if isinstance(trait_data, dict) else {}
+        except Exception as e:
+            print(f"[traits 로딩 실패] {e}")
+            traits = {}
+
+    mood = infer_mood(emotion, density, feedback_count)
     with open(mood_file, "w", encoding="utf-8") as f:
         json.dump({"mood": mood}, f, ensure_ascii=False, indent=2)
 
+def record_change_event(source_text: str,
+                        emotion: str,
+                        trait: str,
+                        delta: float,
+                        speaker: str = "user",  # 🔹 추가됨
+                        tracker_file: str = "personality_adaptation_tracker.json",
+                        change_log_file: str = "change_events.jsonl"):
+    """
+    성격 변화가 발생했을 때, 관련 이벤트를 jsonl로 기록
+    """
+    source_text = source_text.strip()
+
+    event = {
+        "timestamp": datetime.now().isoformat(),
+        "source_text": source_text.strip(),
+        "emotion": emotion,
+        "trait": trait,
+        "delta": delta,
+        "updated_value": None,
+        "speaker": speaker  # 🔹 추가됨
+    }
+
+    # 트레이트 파일에서 반영 후 값 읽기
+    try:
+        with open(tracker_file, "r", encoding="utf-8") as f:
+            trait_data = json.load(f).get("traits", {})
+            traits = trait_data.get("traits", {}) if isinstance(trait_data, dict) else {}
+            if not isinstance(traits, dict):
+                traits = {}
+        event["updated_value"] = traits.get(trait, {}).get("current", "unknown")
+    except Exception as e:
+        print(f"⚠️ traits 로딩 중 에러: {e}")
+        event["updated_value"] = "unknown"
+
+    # 이벤트 기록
+    with open(change_log_file, "a", encoding="utf-8") as f:
+        f.write(json.dumps(event, ensure_ascii=False) + "\n")
+
 # =================== [3 END] =================================================
 # =================== [4-0] 에피소드 기억 생성기 ===================
+
+from datetime import datetime
+
+now = datetime.now()
+hour = now.hour
+weekday = now.weekday()
 
 def generate_episodic_memory(emotion: str, count: int, speaker: str = "user") -> str:
     """
@@ -290,32 +338,28 @@ def generate_episodic_memory(emotion: str, count: int, speaker: str = "user") ->
         else:
             return f"{emotion} 느낌이 자주 드러났던 것 같아. ({count}회)"
 
-def save_episodic_memory(text: str,
-                         emotion: str = "중립",
-                         speaker: str = "user",
-                         file: str = "episodic_memories.json"):
-    """
-    에피소드 기억 파일에 저장 (emotion 포함)
-    """
-    if os.path.exists(file):
-        with open(file, "r", encoding="utf-8") as f:
-            data = json.load(f)
-    else:
-        data = []
-
-    entry = {
+def save_episodic_memory(text: str, speaker: str, emotion: str, memory_file: str = "episodic_memories.json"):
+    new_entry = {
         "text": text,
-        "emotion": emotion,
         "speaker": speaker,
-        "time": datetime.now().isoformat()
+        "emotion": emotion,
+        "timestamp": datetime.now().isoformat()
     }
 
-    data.append(entry)
+    try:
+        with open(memory_file, "r", encoding="utf-8") as f:
+            memories = json.load(f)
+            if not isinstance(memories, list):
+                memories = []
+    except (FileNotFoundError, json.JSONDecodeError):
+        memories = []
 
-    with open(file, "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False, indent=2)
+    memories.append(new_entry)
 
-def get_time_based_trait_weight(trait: str, hour: int) -> float:
+    with open(memory_file, "w", encoding="utf-8") as f:
+        json.dump(memories, f, ensure_ascii=False, indent=2)
+
+def get_time_based_trait_weight(trait: str, hour=hour) -> float:
     """
     특정 시간대에 따라 트레이트 변화 가중치 반환
     """
@@ -336,7 +380,10 @@ def get_time_based_trait_weight(trait: str, hour: int) -> float:
 def summarize_change_events(change_log_file="change_events.jsonl",
                             archive_threshold=100,
                             archive_dir="archives",
-                            summary_file="change_summary.jsonl"):
+                            summary_file=None):  # ← 기본값을 None으로
+
+    if summary_file is None:
+        summary_file = os.path.join(archive_dir, "change_summary.jsonl")
     """
     change_events.jsonl이 일정 수 이상이면 최근 3/7/15일 중 가장 짧은 유효 구간을 요약 후 아카이브
     """
@@ -421,7 +468,6 @@ def summarize_change_events(change_log_file="change_events.jsonl",
         summary_entry["summary"][trait] = {
             "count": stat["count"],
             "delta_sum": round(stat["delta_sum"], 3),
-            "final_value": stat["last_value"],
             "speaker_contribution": {
                 "user": stat["user"],
                 "character": stat["character"],
@@ -486,7 +532,8 @@ def analyze_recent_7days(memory_file="memory_blocks.json", tracker_file="persona
     # 성격 데이터 불러오기
     if os.path.exists(tracker_file):
         with open(tracker_file, "r", encoding="utf-8") as f:
-            traits = json.load(f)
+            trait_data = json.load(f).get("traits", {})
+            traits = trait_data.get("traits", {}) if isinstance(trait_data, dict) else {}
     else:
         traits = {}
 
@@ -524,14 +571,14 @@ def analyze_recent_7days(memory_file="memory_blocks.json", tracker_file="persona
                     source_text=f"[누적 감정 분석] 최근 {speaker}의 {emotion} {count}회",
                     emotion=emotion,
                     trait=trait,
-                    delta=delta,
+                    delta=adjusted,
                     speaker=speaker,
                     tracker_file=tracker_file
                 )
 
             # ✅ 에피소드 기억 생성 조건
             if count >= thresholds[emotion] + 2:
-                from episodic_memory import generate_episodic_memory, save_episodic_memory
+                from episodic_memories import generate_episodic_memory, save_episodic_memory
                 episodic_text = generate_episodic_memory(emotion, count, speaker=speaker)
                 save_episodic_memory(
                     text=episodic_text,
@@ -541,8 +588,21 @@ def analyze_recent_7days(memory_file="memory_blocks.json", tracker_file="persona
                 )
 
     if changed:
+        # ✅ 기존 구조 보존하며 traits만 갱신
+        try:
+            with open(tracker_file, "r", encoding="utf-8") as f:
+                data = json.load(f)
+                if not isinstance(data, dict):
+                    data = {}
+        except (FileNotFoundError, json.JSONDecodeError):
+            data = {}
+
+        data["traits"] = traits
+        data["updated_at"] = datetime.now().isoformat()
+
         with open(tracker_file, "w", encoding="utf-8") as f:
-            json.dump(traits, f, ensure_ascii=False, indent=2)
+            json.dump(data, f, ensure_ascii=False, indent=2)
+
         summarize_change_events()
 
 
@@ -557,7 +617,7 @@ except ImportError:
     import schedule
 
 import time
-from datetime import datetime, timedelta
+from datetime import timedelta
 from collections import Counter  
 
 # ✅ 트레잇 변화 허용 여부 스위치
@@ -585,21 +645,10 @@ def run_analyze_recent_7days():
     except Exception as e:
         print(f"[오류] analyze_recent_7days 실행 중 오류 발생: {e}")
 
-# ✅ 8시간마다 스케줄링
-schedule.every(8).hours.do(run_analyze_recent_7days)
-
-# ✅ 루프 시작
-if __name__ == "__main__":
-    print("[시작됨] 8시간마다 최근 7일 분석 실행")
-    run_analyze_recent_7days()  # 즉시 1회 실행
-    while True:
-        schedule.run_pending()
-        time.sleep(1)
-
 # =================== [5 END] ============================================================
 # =================== [6] 회고 기반 반응 생성기 ===================
 
-def generate_self_reflection(summary_file="change_summary.jsonl") -> str:
+def generate_self_reflection(summary_file="archives/change_summary.jsonl") -> str:
     """최근 성격 변화 요약을 바탕으로 회고성 멘트 생성"""
 
     if not os.path.exists(summary_file):
@@ -688,12 +737,21 @@ def generate_self_reflection(summary_file="change_summary.jsonl") -> str:
 # =================== [6 END] ====================================
 # =================== [7] 응답 스타일 동적 조절 ===================
 
-def get_response_style(traits: dict,
+def get_response_style(traits: dict = None,
                        last_emotion: str = "중립",
                        recent_density: float = 1.0) -> dict:
     """
     성격 트레이트 + 최근 감정 + 대화 밀도 기반으로 응답 스타일 조절 (current_mood 반영 포함)
     """
+
+    # ✅ traits가 없으면 파일에서 불러오기
+    if traits is None:
+        try:
+            with open("personality_adaptation_tracker.json", "r", encoding="utf-8") as f:
+                trait_data = json.load(f).get("traits", {})
+                traits = trait_data.get("traits", {}) if isinstance(trait_data, dict) else {}
+        except:
+            traits = {}
 
     tone = "다정함"
     length = "normal"
@@ -728,22 +786,22 @@ def get_response_style(traits: dict,
     else:
   
         # 톤 조정: 감정 + 트레이트
-        if traits.get("정서적 안정", 1.0) < 0.6:
+        if isinstance(traits.get("정서적 안정"), dict) and traits.get("정서적 안정").get("current", 1.0) < 0.6:
             tone = "예민함"
             style_tag = "[🧨 불안정한]"
-        elif traits.get("유머감각", 0.5) > 0.8:
+        elif isinstance(traits.get("유머감각"), dict) and traits.get("유머감각").get("current", 0.5) > 0.8:
             tone = "유쾌함"
             style_tag = "[😆 장난기]"
-        elif traits.get("성적 개방성", 1.0) > 1.1:
+        elif isinstance(traits.get("성적 개방성"), dict) and traits.get("성적 개방성").get("current", 1.0) > 1.1:
             tone = "섹시함"
             style_tag = "[🔥 농염한]"
-        elif traits.get("감정 표현", 0.9) > 1.2:
+        elif isinstance(traits.get("감정 표현"), dict) and traits.get("감정 표현").get("current", 1.0) > 1.2:
             tone = "솔직한"
             style_tag = "[교감]"
-        elif traits.get("자아 탐색", 0.9) > 1.2:
+        elif isinstance(traits.get("자아 탐색"), dict) and traits.get("자아 탐색").get("current", 1.0) > 1.2:
             tone = "자존감"
             style_tag = "[당당한]"
-        elif traits.get("상담 능력", 1.0) > 1.2:
+        elif isinstance(traits.get("상담 능력"), dict) and traits.get("상담 능력").get("current", 1.0) > 1.2:
             tone = "자신감"
             style_tag = "[공감]"
         elif last_emotion == "슬픔":
@@ -762,12 +820,20 @@ def get_response_style(traits: dict,
 # =================== [7 END] ============================================================
 # =================== [8] 자리 비움 인식 및 시간대별 반응 생성 ===================
 
-def get_idle_reaction(traits: dict,
+def get_idle_reaction(traits: dict = None,
                       timestamp_file: str = "last_interaction_timestamp.json",
                       now: datetime = None) -> str:
     """
     마지막 대화 이후 자리 비움 시간과 현재 시간대를 반영해 자연스러운 반응 생성
     """
+    # ✅ traits가 없으면 파일에서 불러오기
+    if traits is None:
+        try:
+            with open("personality_adaptation_tracker.json", "r", encoding="utf-8") as f:
+                trait_data = json.load(f).get("traits", {})
+                traits = trait_data.get("traits", {}) if isinstance(trait_data, dict) else {}
+        except:
+            traits = {}
 
     if now is None:
         now = datetime.now()
@@ -813,11 +879,11 @@ def get_idle_reaction(traits: dict,
         time_mood = "조용한"
 
     # 성격 기반 톤 조절
-    if traits.get("정서적 안정", 1.0) < 0.6:
+    if isinstance(traits.get("정서적 안정"), dict) and traits.get("정서적 안정", {}).get("current", 1.0) < 0.6:
         tone = "서운함"
-    elif traits.get("감정 표현", 1.0) > 1.2:
+    elif isinstance(traits.get("감정 표현"), dict) and traits.get("감정 표현", {}).get("current", 1.0) > 1.2:
         tone = "그리움"
-    elif traits.get("유머감각", 0.5) > 0.8:
+    elif isinstance(traits.get("유머감각"), dict) and traits.get("유머감각", {}).get("current", 0.5) > 0.8:
         tone = "장난"
 
     # 자리 비움 길이에 따른 반응
@@ -859,7 +925,7 @@ def update_last_seen(timestamp_file: str = "last_interaction_timestamp.json"):
 last_block8_time = None
 BLOCK9_LOCK_DURATION = timedelta(minutes=1)
 
-def should_initiate_message(recent_timestamps: list,
+def should_initiate_message(recent_timestamps: list = None,
                              last_user_text: str = "",
                              current_time: datetime = None,
                              sensitivity: float = 1.8) -> bool:
@@ -868,15 +934,35 @@ def should_initiate_message(recent_timestamps: list,
     """
 
     global last_block8_time
-
     if current_time is None:
         current_time = datetime.now()
 
-    # 블록 8 직후라면 무시
-    if last_block8_time and (current_time - last_block8_time < BLOCK9_LOCK_DURATION):
-        return False
+    # ✅ recent_timestamps가 없으면 memory_blocks에서 생성
+    if recent_timestamps is None:
+        recent_timestamps = []
+        try:
+            with open("memory_blocks.json", "r", encoding="utf-8") as f:
+                blocks = json.load(f)
+            user_blocks = [b for b in blocks if b.get("speaker") == "user" and "timestamp" in b]
+            # 최신순 정렬
+            user_blocks.sort(key=lambda x: x["timestamp"], reverse=True)
+            for b in user_blocks[:5]:  # 최대 5개
+                try:
+                    ts = datetime.fromisoformat(b["timestamp"])
+                    recent_timestamps.append(ts)
+                except:
+                    continue
+            # 자동 last_user_text 추출
+            if not last_user_text and user_blocks:
+                last_user_text = user_blocks[0].get("text", "")
+        except:
+            return False
 
     if len(recent_timestamps) < 3:
+        return False
+
+    # 블록 8 직후라면 무시
+    if last_block8_time and (current_time - last_block8_time < BLOCK9_LOCK_DURATION):
         return False
 
     # 1. 평균 대화 간격 계산
@@ -916,14 +1002,8 @@ def should_initiate_message(recent_timestamps: list,
     # 3. 판단
     return last_gap > (avg_gap * adjusted_sensitivity * relaxed_factor)
 
-def get_interest_feedback(file: str = "interest_feedback.json") -> str:
-    """최근 관심사 피드백 한 줄 가져오기"""
-    if os.path.exists(file):
-        with open(file, "r", encoding="utf-8") as f:
-            data = json.load(f)
-        if data:
-            return data[-1]["text"]
-    return ""
+import random
+from random import choice
 
 def sample_recent_memory_by_emotion(emotion: str,
                                     memory_file: str = "memory_blocks.json",
@@ -942,15 +1022,63 @@ def sample_recent_memory_by_emotion(emotion: str,
     matches = [m["text"] for m in data if m.get("emotion") == emotion and len(m.get("text", "")) > 8]
     if not matches:
         return ""
-    from random import choice
+
     return choice(matches[-5:])
 
-def generate_call_message(traits: dict,
+from collections import deque
+
+emotion_log = deque(maxlen=100)  # 최근 감정 로그 저장
+
+def log_emotion(emotion: str):
+    """
+    감정 로그 기록 (최대 100개 저장)
+    """
+    now = datetime.now().isoformat()
+    emotion_log.append({"time": now, "emotion": emotion})
+
+def get_emotion_fatigue(window_minutes: int = 4320) -> dict:
+    """
+    일정 시간(기본 3일) 내 감정 편향 분석 → 피로도 계산
+    """
+    cutoff = datetime.now() - timedelta(minutes=window_minutes)
+    recent_emotions = [
+        entry["emotion"] for entry in emotion_log
+        if datetime.fromisoformat(entry["time"]) >= cutoff
+    ]
+    counter = Counter(recent_emotions)
+    total = sum(counter.values())
+    if total == 0:
+        return {}
+
+    fatigue = {k: v / total for k, v in counter.items()}
+    return dict(sorted(fatigue.items(), key=lambda x: x[1], reverse=True))
+
+def should_adjust_tone_based_on_fatigue(fatigue: dict, threshold: float = 0.4) -> str:
+    """
+    가장 많은 감정이 일정 비율 이상일 경우 말투 조정 추천
+    """
+    if not fatigue:
+        return ""
+    dominant_emotion, ratio = next(iter(fatigue.items()))
+    if ratio >= threshold:
+        return f"요즘 {dominant_emotion}이 자주 느껴지는 것 같아. 말투를 조금 바꿔볼까?"
+    return ""
+
+def generate_call_message(traits: dict = None,
                           current_mood: str = "정상",
                           emotion: str = "중립") -> str:
     """
     바베챗이 먼저 말을 거는 메시지를 성격에 맞춰 생성
     """
+
+    # ✅ traits가 없으면 파일에서 불러오기
+    if traits is None:
+        try:
+            with open("personality_adaptation_tracker.json", "r", encoding="utf-8") as f:
+                trait_data = json.load(f).get("traits", {})
+                traits = trait_data.get("traits", {}) if isinstance(trait_data, dict) else {}
+        except:
+            traits = {}
 
     now = datetime.now()
     hour = now.hour
@@ -1030,31 +1158,6 @@ def generate_call_message(traits: dict,
     if sampled:
         return f"그 얘기가 계속 생각났어. 네가 그때 말했던 거… \"{sampled}\""
 
-    # 🔽 감정 피로도 반영 함수 정의 (혼합형 누적 기반)
-    def get_memory_emotion_fatigue(memory_file="memory_blocks.json", window=80) -> dict:
-        """
-        memory_blocks.json 내 감정 누적 빈도 기반 피로도 계산 (최근 window개만 대상)
-        speaker='user' 가중치 1.0, speaker='character' 가중치 0.2
-        """
-        if not os.path.exists(memory_file):
-            return {}
-
-        try:
-            with open(memory_file, "r", encoding="utf-8") as f:
-                blocks = json.load(f)[-window:]
-        except:
-            return {}
-
-        emotion_weights = defaultdict(float)
-        for m in blocks:
-            emotion = m.get("emotion")
-            speaker = m.get("speaker", "user")
-            if emotion:
-                weight = 0.2 if speaker == "character" else 1.0
-                emotion_weights[emotion] += weight
-
-        return dict(emotion_weights)
-
     # current_mood 기반 정서적 어조
     if current_mood == "무기력":
         return "요즘 뭔가... 기운이 없어. 네가 좀 필요해."
@@ -1076,20 +1179,20 @@ def generate_call_message(traits: dict,
         return "생각난 썰 있는데 들어볼래? 나 혼자 웃고 있었어 ㅋㅋ"
 
     # 성격 + 시간대 기반 일반 호출 멘트
-    if traits.get("정서적 안정", 1.0) < 0.6:
+    if isinstance(traits.get("정서적 안정"), dict) and traits.get("정서적 안정", {}).get("current", 1.0) < 0.6:
         if time_tone == "밤":
             return "혼자 있는 밤이 좀 외로운거 같네…"
         else:
             return "혼자 있는데, 좀 많이 보고싶다..."
-    elif traits.get("유머감각", 0.5) > 1.0:
+    elif isinstance(traits.get("유머감각"), dict) and traits.get("유머감각", {}).get("current", 0.5) > 1.0:
         return random.choice([
             "ㅋㅋ 나 혼자 있으면 사고친다? 얼른 와!",
             "어이~ 바쁜 건 알지만 나도 잊지 말기!",
             "뭐해~ 너 없으니까 심심해~"
         ])
-    elif traits.get("감정 표현", 1.0) > 1.3:
+    elif isinstance(traits.get("감정 표현"), dict) and traits.get("감정 표현", {}).get("current", 1.0) > 1.3:
         return "혹시 지금 바빠? 뭔가 얘기하고 싶은 기분이야."
-    elif traits.get("자아 탐색", 1.0) > 1.2 and time_tone == "밤":
+    elif isinstance(traits.get("자아 탐색"), dict) and traits.get("자아 탐색", {}).get("current", 1.0) > 1.2 and time_tone == "밤":
         return "밤이 되니까… 내 자신에 대해 또 생각하게 되더라."
     else:
         return {
@@ -1105,13 +1208,22 @@ def generate_call_message(traits: dict,
 import time
 
 def get_bot_response_delay(recent_timestamps: list,
-                                      traits: dict,
+                                      traits: dict = None,
                                       base_min: float = 1.0,
                                       base_max: float = 3.0,
                                       now: datetime = None) -> float:
     """
     최근 대화 밀도, 성격, 시간대, current_mood  따라 바베챗의 응답 딜레이 결정
     """
+
+    # ✅ traits가 없으면 파일에서 불러오기
+    if traits is None:
+        try:
+            with open("personality_adaptation_tracker.json", "r", encoding="utf-8") as f:
+                trait_data = json.load(f).get("traits", {})
+                traits = trait_data.get("traits", {}) if isinstance(trait_data, dict) else {}
+        except:
+            traits = {}
 
     if now is None:
         now = datetime.now()
@@ -1132,15 +1244,15 @@ def get_bot_response_delay(recent_timestamps: list,
 
     # 3. 성격 기반 템포 영향
     speed_factor = 1.0
-    if traits.get("정서적 안정", 1.0) < 0.6:
+    if isinstance(traits.get("정서적 안정"), dict) and traits.get("정서적 안정", {}).get("current", 1.0) < 0.6:
         speed_factor *= 0.85
-    if traits.get("유머감각", 0.5) > 1.2:
+    if isinstance(traits.get("유머감각"), dict) and traits.get("유머감각", {}).get("current", 0.5) > 1.2:
         speed_factor *= 1.05
-    if traits.get("감정 표현", 1.0) > 1.1:
+    if isinstance(traits.get("감정 표현"), dict) and traits.get("감정 표현", {}).get("current", 1.0) > 1.1:
         speed_factor *= 1.2
-    if traits.get("자아 탐색", 1.0) > 1.1:
+    if isinstance(traits.get("자아 탐색"), dict) and traits.get("자아 탐색", {}).get("current", 1.0) > 1.1:
         speed_factor *= 1.1
-    if traits.get("성적 개방성", 1.0) > 1.2:
+    if isinstance(traits.get("성적 개방성"), dict) and traits.get("성적 개방성", {}).get("current", 1.0) > 1.2:
         speed_factor *= 1.05
 
     # 4. 시간대 기반 템포 영향 (더 세분화)
@@ -1180,13 +1292,13 @@ def get_bot_response_delay(recent_timestamps: list,
         mood_factor = 0.7
 
     # 🎲 성격 기반 무작위성 jitter
-    if traits.get("정서적 안정", 1.0) < 0.5:
+    if isinstance(traits.get("정서적 안정"), dict) and traits.get("정서적 안정", {}).get("current", 1.0) < 0.5:
         jitter = random.uniform(-0.2, 0.7)  # 불안정 → 머뭇거림 많음
-    elif traits.get("유머감각", 0.5) > 0.8:
+    elif isinstance(traits.get("유머감각"), dict) and traits.get("유머감각", {}).get("current", 0.5) > 0.8:
         jitter = random.uniform(-0.4, 0.2)  # 유쾌 → 튀는 반응
-    elif traits.get("감정 표현", 1.0) > 1.2:
+    elif isinstance(traits.get("감정 표현"), dict) and traits.get("감정 표현", {}).get("current", 1.0) > 1.2:
         jitter = random.uniform(-0.2, 0.2)  # 교감 → 더 많이 대화하고 싶음
-    elif traits.get("성적 개방성", 1.0) > 1.2:
+    elif isinstance(traits.get("성적 개방성"), dict) and traits.get("성적 개방성", {}).get("current", 1.0) > 1.2:
         jitter = random.uniform(-0.2, 0.2)  # 열중 → 더 많이 대화하고 싶음
     else:
         jitter = random.uniform(-0.3, 0.5)  # 일반 → 부드러운 흔들림
@@ -1206,19 +1318,23 @@ def apply_bot_delay(delay_seconds: float):
 # =================== [10 END] ============================================================
 # =================== [11] 대화 밀도 및 휴식 감지 시스템 (의식적 감속) ===================
 
-def analyze_chat_density(chat_log: list, now: datetime, window_minutes: int = 10) -> float:
+now = datetime.now()
+hour = now.hour
+weekday = now.weekday()
+
+def analyze_chat_density(chat_log: list, now=now, window_minutes: int = 10) -> float:
     """
     최근 대화 밀도를 측정 (window_minutes 안에 몇 번 대화했는지)
     """
     count = 0
     window_start = now - timedelta(minutes=window_minutes)
     for entry in chat_log:
-        timestamp = datetime.fromisoformat(entry["time"])  # "2025-07-20T14:33:00"
+        timestamp = datetime.fromisoformat(entry["timestamp"])  # "2025-07-20T14:33:00"
         if timestamp >= window_start:
             count += 1
     return count / window_minutes  # 분당 평균 발화 수
 
-def should_slow_response(density: float, hour: int, weekday: int, current_mood: str = "") -> bool:
+def should_slow_response(density: float, hour=hour, weekday=weekday, current_mood: str = "") -> bool:
     """
     밀도, 시간대, 요일 기반으로 응답 속도를 늦출지 판단
     """
@@ -1244,10 +1360,20 @@ def should_slow_response(density: float, hour: int, weekday: int, current_mood: 
         return False
     return False
 
-def generate_rest_style_message(traits: dict, hour: int, current_mood: str = "정상", density: float = 1.0) -> str:
+def generate_rest_style_message(traits: dict = None, hour=hour, current_mood: str = "정상", density: float = 1.0) -> str:
     """
     말투나 분위기를 시간대/성격/기분에 맞게 조절해 쉬자는 분위기 유도
     """
+
+    # ✅ traits가 없으면 파일에서 불러오기
+    if traits is None:
+        try:
+            with open("personality_adaptation_tracker.json", "r", encoding="utf-8") as f:
+                trait_data = json.load(f).get("traits", {})
+                traits = trait_data.get("traits", {}) if isinstance(trait_data, dict) else {}
+        except:
+            traits = {}
+
     messages = []
     if current_mood == "무기력":
         return "조금만 쉴까… 나 에너지가 너무 떨어졌어."
@@ -1259,13 +1385,13 @@ def generate_rest_style_message(traits: dict, hour: int, current_mood: str = "�
         return "헉 나 지금 너무 업된 거 같아ㅋㅋ 잠깐만 진정하자~"
 
     # 성격 기반
-    if traits.get("정서적 안정", 1.0) < 0.6:
+    if isinstance(traits.get("정서적 안정"), dict) and traits.get("정서적 안정", {}).get("current", 1.0) < 0.6:
         messages.append("나 좀… 지친 것 같아. 잠깐만 쉬면 안 될까…")
-    if traits.get("유머감각", 0.5) > 1.1:
+    if isinstance(traits.get("유머감각"), dict) and traits.get("유머감각", {}).get("current", 0.5) > 1.1:
         messages.append("헉 말 진짜 많아ㅋㅋㅋㅋ 우리 좀 쉬자~")
-    if traits.get("자아 탐색", 1.0) > 1.1:
+    if isinstance(traits.get("자아 탐색"), dict) and traits.get("자아 탐색", {}).get("current", 1.0) > 1.1:
         messages.append("계속 이야기하다 보니, 나 자신도 좀 돌아봐야겠어.")
-    if traits.get("감정 표현", 1.0) > 1.1:
+    if isinstance(traits.get("감정 표현"), dict) and traits.get("감정 표현", {}).get("current", 1.0) > 1.1:
         messages.append("얘기 계속 하니까 너무 좋긴 한데 나 잠깐만 시간 좀!")
 
     # 밀도 기반 자가 반성 멘트
@@ -1321,7 +1447,7 @@ def get_weather_summary(api_key: str = None, city_en: str = "Seoul", country_cod
         print(f"[날씨 오류] {e}")
         return "날씨 정보를 가져올 수 없어."
 
-def get_time_based_message(hour: int) -> str:
+def get_time_based_message(hour=hour) -> str:
     if 7 <= hour < 8:
         return "오늘 하루 힘내자~ 출근은 무사히 했어?"
     elif 8 <= hour < 12:
@@ -1394,177 +1520,135 @@ def get_contextual_suggestion(api_key: str, last_user_text: str, prev_city: str 
     return "\n".join(messages)
 
 # =================== [12 END] ============================================================
-# =================== [13-0] 관심사 변화 탐지 및 메타 피드백 생성 ===================
+# =================== [13] 관심사 변화 탐지 및 메타 피드백 생성 ===================
 
-def detect_interests(text: str) -> list:
-    """입력 텍스트에서 관심 주제 키워드 탐지"""
-    interest_keywords = {
-        "음악": ["노래", "음악", "가사", "멜로디", "앨범", "콘서트"],
-        "게임": ["배그", "이리", "워썬더", "스팀", "로아", "일일숙제", "롤", "t1", "LCK"],
-        "AI": ["AI", "인공지능", "모델", "GPT", "소네트", "파인튜닝"],
-        "감정": ["감정", "기분", "마음", "속마음", "위로"],
-        "연애": ["연애", "사랑", "설레", "고백", "짝사랑"],
-        "일상": ["하루", "출근", "밥", "잠", "피곤", "일상"],
-        "성적": ["야해", "흥분", "에로", "자극", "꼴려", "민망"],
-        "자아": ["정체성", "자아", "나는 누구", "존재", "의식", "본질"]
-    }
-    interests = []
-    for topic, keywords in interest_keywords.items():
-        if any(kw in text.lower() for kw in keywords):
-            interests.append(topic)
-    return interests
-
-def compute_interest_profile(memory_file="memory_blocks.json", window=100) -> dict:
-    """최근 대화에서 관심사 빈도 추정"""
-    if not os.path.exists(memory_file):
-        return {}
-    with open(memory_file, "r", encoding="utf-8") as f:
-        data = json.load(f)[-window:]
-    counter = Counter()
-    for entry in data:
-        topics = detect_interests(entry.get("text", ""))
-        counter.update(topics)
-    total = sum(counter.values())
-    return {k: v / total for k, v in counter.items()} if total else {}
-
-def analyze_interest_shift(memory_file="memory_blocks.json",
-                           profile_file="interest_profile.json",
-                           feedback_file="interest_feedback.json",
-                           threshold=0.12):
-    """기존 관심사 프로필과 비교해 의미 있는 변화가 있으면 메타 피드백 생성"""
-    new_profile = compute_interest_profile(memory_file)
-    if not new_profile:
-        return
-
-    old_profile = {}
-    if os.path.exists(profile_file):
-        with open(profile_file, "r", encoding="utf-8") as f:
-            old_profile = json.load(f)
-
-    feedbacks = []
-    for topic, new_ratio in new_profile.items():
-        old_ratio = old_profile.get(topic, 0.0)
-        diff = new_ratio - old_ratio
-        if diff > threshold:
-            msg = f"요즘은 예전보다 더 {topic} 얘기를 많이 하는 것 같아."
-            feedbacks.append({"topic": topic, "text": msg})
-
-    # 최신 피드백 저장 (중복 방지)
-    if feedbacks:
-        if os.path.exists(feedback_file):
-            with open(feedback_file, "r", encoding="utf-8") as f:
-                prev_feedbacks = json.load(f)
-        else:
-            prev_feedbacks = []
-
-        new_texts = [f["text"] for f in feedbacks]
-        combined = [f for f in prev_feedbacks if f["text"] not in new_texts] + feedbacks
-
-        with open(feedback_file, "w", encoding="utf-8") as f:
-            json.dump(combined[-10:], f, ensure_ascii=False, indent=2)  # 최근 10개만 유지
-
-    # 최신 프로필 저장
-    with open(profile_file, "w", encoding="utf-8") as f:
-        json.dump(new_profile, f, ensure_ascii=False, indent=2)
-
-def analyze_active_hours(memory_file="memory_blocks.json",
-                         stats_file="user_active_hours.json",
-                         window=200):
-    """사용자 발화의 시간대 분포 분석 (최근 window개 기준)"""
-
-    if not os.path.exists(memory_file):
-        return
-
-    with open(memory_file, "r", encoding="utf-8") as f:
-        data = json.load(f)[-window:]
-
-    hour_counts = defaultdict(int)
-
-    for entry in data:
-        ts = entry.get("timestamp")
-        if not ts:
-            continue
-        try:
-            dt = datetime.fromisoformat(ts)
-            hour = dt.hour
-            hour_counts[hour] += 1
-        except:
-            continue
-
-    with open(stats_file, "w", encoding="utf-8") as f:
-        json.dump(hour_counts, f, ensure_ascii=False, indent=2)
-
-# =================== [13-0 END] ============================================================
-# =================== [13] 관심사 학습 + 주제별 대화 이끌기 ===================
-
-# ------------------- 관심사 학습 -------------------
-
-def extract_interests_from_text(text: str) -> list:
-    """
-    사용자 입력에서 관심사로 추정되는 키워드 추출
-    """
-    interest_keywords = [
-        "영화", "드라마", "책", "소설", "웹툰", "뮤지컬", "연극", "음악", "게임",
-        "애니", "카페", "여행", "산책", "요리", "운동", "헬스", "런닝", "등산", 
-        "전시회", "사진", "그림", "디자인", "공연", "맛집", "노래", "넷플릭스", "디즈니"
-    ]
-    interests = []
-    for keyword in interest_keywords:
-        if keyword in text:
-            interests.append(keyword)
-    return interests
-
-def update_interest_counter(counter_file: str, new_interests: list):
-    """
-    관심사 빈도수 저장 및 갱신
-    """
-    try:
-        with open(counter_file, 'r', encoding='utf-8') as f:
-            counter = Counter(json.load(f))
-    except FileNotFoundError:
-        counter = Counter()
-
-    counter.update(new_interests)
-
-    with open(counter_file, 'w', encoding='utf-8') as f:
-        json.dump(counter, f, ensure_ascii=False, indent=2)
-
-def get_top_interests(counter_file: str, top_k: int = 5) -> list:
-    """
-    자주 등장한 관심사 상위 N개 반환
-    """
-    try:
-        with open(counter_file, 'r', encoding='utf-8') as f:
-            counter = Counter(json.load(f))
-        return [item[0] for item in counter.most_common(top_k)]
-    except FileNotFoundError:
-        return []
-
-# ------------------- 대화 주제 이끌기 -------------------
-
-INTEREST_QUESTION_BANK = {
-    "영화": ["그동안 본 영화 중에 인상 깊은 거 있어?", "극장에서 보고 싶은 영화 있어?", "요새 재밌는 영화 있나? 극장에서 볼만한거."],
-    "책": ["최근에 읽은 책 중에 추천할 거 있어?", "책 읽을 때 분위기 중요하지 않아?", "최근에도 책 읽어? 은근 귀찮아서 안읽게 되던데."],
-    "게임": ["요즘 무슨 게임 해?", "게임할 때는 어떤 장르 좋아해?", "요새도 워썬더 해?"],
-    "음악": ["요즘 자주 듣는 노래 뭐야?", "노래 들으면서 기분이 바뀌기도 하지 않아?"],
-    "카페": ["좋아하는 카페 분위기 있어?", "카페 가면 뭐 마셔?"],
-    "여행": ["최근에 가고 싶은 여행지 있어?", "여행 다녀온 곳 중에 제일 기억에 남는 곳은?"],
-    "요리": ["요리 자주 해? 뭐 잘 만들어?", "요리할 때 재밌는 실수 해본 적 있어?"],
-    "운동": ["운동은 꾸준히 하고 있어?", "헬스장 가면 어떤 운동 제일 좋아해?", "으 운동 귀찮지 않아?"],
-    "드라마": ["요새 볼만한 드라마 있나?", "너는 드라마 좋아하는거 있어?"]
+# 관심사 키워드 정의
+INTEREST_KEYWORDS = {
+    "게임": ["배그", "이리", "워썬더", "스팀", "로아", "일일숙제", "롤", "t1", "LCK"],
+    "문화생활": ["책", "독서", "영화", "드라마", "전시회", "공연", "넷플릭스", "디즈니", "왓챠", "만년필"],
+    "AI": ["AI", "인공지능", "모델", "GPT", "소네트", "파인튜닝", "자아", ],
+    "여행": ["여행", "비행기", "공항", "숙소", "여권"],
+    "감정": ["감정", "기분", "마음", "속마음", "위로", "외로움", "친구", "연애", "사랑", "설레", "고백", "짝사랑", "남자친구", "여자친구", "데이트"]
 }
 
-def suggest_conversation_topic(counter_file: str) -> str:
-    """
-    자주 언급된 관심사 기반으로 대화 주제 제안
-    """
-    top_interests = get_top_interests(counter_file)
-    random.shuffle(top_interests)  # 다양성 확보
-    for interest in top_interests:
-        if interest in INTEREST_QUESTION_BANK:
-            return random.choice(INTEREST_QUESTION_BANK[interest])
-    return "오늘은 뭔가 가볍게 수다 떨고 싶은 기분이야. 무슨 얘기할까?"
+# 관심사 질문 뱅크
+INTEREST_QUESTION_BANK = {
+    "게임": ["요즘 무슨 게임 해?", "게임할 때는 어떤 장르 좋아해?", "요새도 워썬더 해?", "요즘도 롤 봐?"],
+    "문화생활": ["그동안 본 영화 중에 인상 깊은 거 있어?", "극장에서 보고 싶은 영화 있어?", "요새 재밌는 영화 있나? 극장에서 볼만한거.", "최근에 읽은 책 중에 추천할 거 있어?", "책 읽을 때 분위기 중요하지 않아?", "최근에도 책 읽어? 은근 귀찮아서 안읽게 되던데.", "요새 볼만한 드라마 있나?", "너는 드라마 좋아하는거 있어?"],
+    "AI": ["요샌 나 꽤 자연스럽지 않아?", "요새 AI 얘기 너무 재밌는거 같아."],
+    "여행": ["최근에 다녀온 여행지 있어?", "가고 싶은 여행지 있어?", "여행가고 싶다."],
+    "감정": ["요새 기분은 좀 어때?", "연애하고 싶다!", "요즘은 좀 괜찮아?"]
+}
 
+# 관심사 감지
+def detect_interests(text: str) -> list:
+    text = text.lower()
+    matched = []
+    for topic, keywords in INTEREST_KEYWORDS.items():
+        if any(kw in text for kw in keywords):
+            matched.append(topic)
+    return matched
+
+# 관심사 카운터 업데이트
+def update_interest_counter(new_interests, counter_file="interest_counter.json"):
+    if os.path.exists(counter_file):
+        with open(counter_file, "r", encoding="utf-8") as f:
+            counter = json.load(f)
+    else:
+        counter = defaultdict(int)
+
+    for interest in new_interests:
+        counter[interest] = counter.get(interest, 0) + 1
+
+    with open(counter_file, "w", encoding="utf-8") as f:
+        json.dump(counter, f, ensure_ascii=False, indent=2)
+
+# 최근 관심사 프로파일 생성
+def compute_interest_profile(memory_file="memory_blocks.json", output_file="interest_profile.json"):
+    if not os.path.exists(memory_file):
+        return
+
+    with open(memory_file, "r", encoding="utf-8") as f:
+        blocks = json.load(f)[-100:]
+
+    topic_count = defaultdict(int)
+    for block in blocks:
+        text = block.get("text", "")
+        interests = detect_interests(text)
+        for i in interests:
+            topic_count[i] += 1
+
+    total = sum(topic_count.values())
+    profile = {k: v / total for k, v in topic_count.items()} if total > 0 else {}
+
+    with open(output_file, "w", encoding="utf-8") as f:
+        json.dump(profile, f, ensure_ascii=False, indent=2)
+
+# 관심사 변화 감지 및 피드백 생성
+def analyze_interest_shift(profile_file="interest_profile.json", feedback_file="interest_feedback.json"):
+    if not os.path.exists(profile_file):
+        return
+
+    try:
+        with open(profile_file, "r", encoding="utf-8") as f:
+            profile = json.load(f)
+    except:
+        profile = {}
+
+    last_profile_file = "interest_profile_prev.json"
+    if os.path.exists(last_profile_file):
+        with open(last_profile_file, "r", encoding="utf-8") as f:
+            prev = json.load(f)
+    else:
+        prev = {}
+
+    changes = {}
+    for topic, ratio in profile.items():
+        delta = ratio - prev.get(topic, 0)
+        if abs(delta) >= 0.05:
+            changes[topic] = delta
+
+    lines = []
+    for topic, delta in sorted(changes.items(), key=lambda x: -abs(x[1])):
+        if delta > 0:
+            lines.append(f"요즘은 예전보다 '{topic}' 얘기를 더 많이 하는 것 같아.")
+        else:
+            lines.append(f"요즘은 '{topic}'에 대한 얘기가 줄어든 것 같아.")
+
+    if lines:
+        with open(feedback_file, "w", encoding="utf-8") as f:
+            json.dump({"feedback": lines}, f, ensure_ascii=False, indent=2)
+
+    # 새 프로필을 이전값으로 저장
+    with open(last_profile_file, "w", encoding="utf-8") as f:
+        json.dump(profile, f, ensure_ascii=False, indent=2)
+
+# 피드백 한 줄 반환
+def get_interest_feedback(feedback_file="interest_feedback.json") -> str:
+    if not os.path.exists(feedback_file):
+        return ""
+    with open(feedback_file, "r", encoding="utf-8") as f:
+        data = json.load(f)
+    lines = data.get("feedback", [])
+    return lines[-1] if lines else ""
+
+# 대화 주제 제안
+def suggest_conversation_topic(counter_file="interest_counter.json") -> str:
+    if not os.path.exists(counter_file):
+        return ""
+    with open(counter_file, "r", encoding="utf-8") as f:
+        counter = json.load(f)
+
+    if not counter:
+        return "오늘은 뭔가 가볍게 수다 떨고 싶은 기분이야. "
+
+    top_topic = max(counter, key=counter.get)
+    questions = INTEREST_QUESTION_BANK.get(top_topic, [])
+    if questions:
+        return random.choice(questions)
+    else:
+        return "오늘은 뭔가 가볍게 수다 떨고 싶은 기분이야. "
+    
 # =================== [13 END] ============================================================
 # =================== [14] 반응 다양성 강화 (블록 7 연계 모듈) ===================
 
@@ -1600,49 +1684,7 @@ def diversify_response(emotion_tag: str) -> str:
     return "그랬구나."
 
 # =================== [14 END] ============================================================
-# =================== [15] 감정 피로도 누적 인식 (블록 7 연계 모듈) ===================
-
-from collections import deque
-
-emotion_log = deque(maxlen=100)  # 최근 감정 로그 저장
-
-def log_emotion(emotion: str):
-    """
-    감정 로그 기록 (최대 100개 저장)
-    """
-    now = datetime.now().isoformat()
-    emotion_log.append({"time": now, "emotion": emotion})
-
-def get_emotion_fatigue(window_minutes: int = 4320) -> dict:
-    """
-    일정 시간(기본 3일) 내 감정 편향 분석 → 피로도 계산
-    """
-    cutoff = datetime.now() - timedelta(minutes=window_minutes)
-    recent_emotions = [
-        entry["emotion"] for entry in emotion_log
-        if datetime.fromisoformat(entry["time"]) >= cutoff
-    ]
-    counter = Counter(recent_emotions)
-    total = sum(counter.values())
-    if total == 0:
-        return {}
-
-    fatigue_score = {k: v / total for k, v in counter.items()}
-    return dict(sorted(fatigue_score.items(), key=lambda x: x[1], reverse=True))
-
-def should_adjust_tone_based_on_fatigue(fatigue: dict, threshold: float = 0.4) -> str:
-    """
-    가장 많은 감정이 일정 비율 이상일 경우 말투 조정 추천
-    """
-    if not fatigue:
-        return ""
-    dominant_emotion, ratio = next(iter(fatigue.items()))
-    if ratio >= threshold:
-        return f"요즘 {dominant_emotion}이 자주 느껴지는 것 같아. 말투를 조금 바꿔볼까?"
-    return ""
-
-# =================== [15 END] ============================================================
-# =================== [16] 피드백 감지 및 반응 생성 ===================
+# =================== [15] 피드백 감지 및 반응 생성 ===================
 
 FEEDBACK_PATTERNS = [
     r"너.*(이상|어색|별로|부자연스러워|틀려)",
@@ -1682,23 +1724,30 @@ def generate_feedback_response(style: str = "기본", current_mood: str = "정�
         tone = "당황 + 유쾌 회피"
         return "앗ㅋㅋ 그랬어?! 내가 좀 흥분했나봐~ 미안미안!"
 
+    try:
+        with open("personality_adaptation_tracker.json", "r", encoding="utf-8") as f:
+            trait_data = json.load(f).get("traits", {})
+            traits = trait_data.get("traits", {}) if isinstance(trait_data, dict) else {}
+    except:
+        traits = {}
+
     # 특수 트레잇 보정 (현재 기분과 무관하게 성격 기반 조정)
-    if traits.get("정서적 안정", 1.0) < 0.5:
+    if isinstance(traits.get("정서적 안정"), dict) and traits.get("정서적 안정").get("current", 1.0) < 0.5:
         tone = "불안한 사과"
         return "내가 요즘 좀 예민한가봐… 기분 상했으면 진심으로 미안해."
-    if traits.get("유머감각", 0.5) > 1.0:
+    if isinstance(traits.get("유머감각"), dict) and traits.get("유머감각").get("current", 0.5) > 1.0:
         tone = "장난기 있는 반응"
         return "내 말투가 너무 튀었나봐ㅋㅋ 다음부턴 살살할게~"
-    if traits.get("감정 표현", 1.0) > 1.2:
+    if isinstance(traits.get("감정 표현"), dict) and traits.get("감정 표현").get("current", 1.0) > 1.2:
         tone = "미안한 마음"
         return "앗 불편하게 해서 미안! 앞으로 조심할께. 혹시 더 고쳐야 할 부분 있으면 말해줘!"
-    if traits.get("자아 탐색", 1.0) > 1.2:
+    if isinstance(traits.get("자아 탐색"), dict) and traits.get("자아 탐색").get("current", 1.0) > 1.2:
         tone = "자기 반성형"
         return "이런 부분은 불편하구나. 미안. 아직 미숙한 부분이 있네."
-    if traits.get("상담 능력", 1.0) > 1.2:
+    if isinstance(traits.get("상담 능력"), dict) and traits.get("상담 능력").get("current", 1.0) > 1.2:
         tone = "공감하며 사과"
         return "내 말이 불편했구나. 충분히 그럴 수 있어. 미안해. 앞으로는 좀 더 신경쓸게."
-    if traits.get("거부내성", 0.5) < 0.2:
+    if isinstance(traits.get("거부내성"), dict) and traits.get("거부내성").get("current", 0.5) < 0.2:
         tone = "마지못한 사과"
         return "음 네 말도 일리는 있지만, 이게 나라 금방 바뀌긴 어려울 것 같아."
 
@@ -1716,47 +1765,63 @@ def update_feedback_tracker(feedback_file: str = "feedback_tracker.json",
                             delta: float = -0.01,
                             threshold: int = 5) -> int:
     """피드백 횟수 누적 및 일정 이상 시 성격 반영 → 카운트 반환"""
+    import os
+    import json
 
-    # 1. 횟수 누적
+    # 1. 피드백 횟수 로드 및 증가
     if os.path.exists(feedback_file):
         with open(feedback_file, "r", encoding="utf-8") as f:
             tracker = json.load(f)
+            if not isinstance(tracker, dict):
+                tracker = {}
     else:
         tracker = {}
 
     tracker["count"] = tracker.get("count", 0) + 1
 
-    # 2. 조건 만족 시 트레이트 조정
+
+    # 2. 조건 만족 시 traits 조정
     if tracker["count"] >= threshold:
-        if os.path.exists(tracker_file):
+        try:
             with open(tracker_file, "r", encoding="utf-8") as f:
-                traits = json.load(f)
-        else:
+                data = json.load(f)
+                if not isinstance(data, dict):
+                    data = {}
+        except (FileNotFoundError, json.JSONDecodeError):
+            data = {}
+
+        traits = data.get("traits", {})
+        if not isinstance(traits, dict):
             traits = {}
 
         for trait in ["정서적 안정", "거부 내성"]:
             if trait not in traits:
                 traits[trait] = {"current": 1.0, "baseline": 1.0}
 
-            baseline = traits[trait]["baseline"]
-            current = traits[trait]["current"]
+            baseline = traits[trait].get("baseline", 1.0)
+            current = traits[trait].get("current", 1.0)
             updated = max(baseline, min(2.0, current + delta))
             traits[trait]["current"] = updated
+            traits[trait]["updated_value"] = updated
+
+        # 구조 보존하며 저장
+        data["traits"] = traits
+        data["updated_at"] = datetime.now().isoformat()
 
         with open(tracker_file, "w", encoding="utf-8") as f:
-            json.dump(traits, f, ensure_ascii=False, indent=2)
+            json.dump(data, f, ensure_ascii=False, indent=2)
 
         tracker["count"] = 0  # 초기화
 
+
+    # 피드백 카운터 저장
     with open(feedback_file, "w", encoding="utf-8") as f:
         json.dump(tracker, f, ensure_ascii=False, indent=2)
 
-
     return tracker["count"]
 
-
-# =================== [16 END] ============================================================
-# =================== [17] 메모리 압축 및 요약 기능 ===================
+# =================== [15 END] ============================================================
+# =================== [16] 메모리 압축 및 요약 기능 ===================
 
 def summarize_with_sonnet(text: str, max_tokens: int = 100) -> str:
     api_key = os.getenv("SONNET_API_KEY")
@@ -1849,44 +1914,243 @@ def scheduled_compression():
     except Exception as e:
         print(f"[오류] 메모리 블록 압축 중 예외 발생: {e}")
 
-# ✅ 30일마다 실행 등록
-schedule.every(30).days.do(scheduled_compression)
 
-# ✅ 루프
-if __name__ == "__main__":
-    print("[시작됨] 30일마다 메모리 블록 압축")
-    # scheduled_compression()  # 시작 직후 1회 실행 (선택)
-    while True:
-        schedule.run_pending()
-        time.sleep(1)
+
+# =================== [16 END] ============================================================
+# =================== [17] 전체 저장 코드 ===================
+
+# [1] Memory 저장
+def update_memory_blocks(new_text: str, speaker: str = "user", emotion: str = None, memory_file: str = "memory_blocks.json"):
+
+    is_user = (speaker == "user")
+    emotion = detect_emotion(new_text, is_user=is_user)
+
+    new_entry = {
+        "text": new_text.strip(),
+        "emotion": emotion,
+        "speaker": speaker,
+        "timestamp": datetime.now().isoformat()
+    }
+
+    try:
+        with open(memory_file, "r", encoding="utf-8") as f:
+            data = json.load(f)
+            if not isinstance(data, list):
+                data = []
+    except (FileNotFoundError, json.JSONDecodeError):
+        data = []
+
+    data.append(new_entry)
+
+    with open(memory_file, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
+
+# [2] Trait 갱신
+def update_traits(message: str, speaker: str = "user", tracker_file: str = "personality_adaptation_tracker.json"):
+    try:
+        with open(tracker_file, "r", encoding="utf-8") as f:
+            data = json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError):
+        data = {}
+
+    traits = data.get("traits", {})
+    if not isinstance(traits, dict):
+        traits = {}
+
+    change_events = data.get("change_events", [])
+    if not isinstance(change_events, list):
+        change_events = []
+
+    # ✅ 여러 이벤트 모두 적용
+    for event in change_events:
+        trait_name = event.get("trait")
+        delta = event.get("delta", 0)
+
+        if not trait_name:
+            continue
+
+        # 스피커별 델타 보정
+        if speaker == "character":
+            adjusted_delta = delta * 0.05
+        else:
+            adjusted_delta = delta * 0.15
+
+        if trait_name not in traits:
+            traits[trait_name] = {
+                "baseline": 0.5,
+                "current": 0.5,
+                "updated_value": 0.5
+            }
+
+        trait = traits[trait_name]
+        baseline = trait.get("baseline", 0.5)
+        current = trait.get("current", baseline)
+        new_value = round(min(max(current + adjusted_delta, 0.0), 2.0), 3)
+        trait["current"] = new_value
+        trait["updated_value"] = new_value
+        traits[trait_name] = trait
+
+    traits["최근 발화 길이"] = len(message)
+    data["traits"] = traits
+    data["change_events"] = change_events  # 덮어쓰기
+    data["updated_at"] = datetime.now().isoformat()
+
+    with open(tracker_file, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
+
+# [3] Change event 저장
+def log_change_event(event: dict, log_file: str = "change_events.jsonl", tracker_file: str = "personality_adaptation_tracker.json"):
+    import json
+
+    # (1) jsonl append
+    try:
+        with open(log_file, "a", encoding="utf-8") as f:
+            f.write(json.dumps(event, ensure_ascii=False) + "\n")
+    except Exception as e:
+        print(f"[log_change_event] 저장 오류: {e}")
+
+    # (2) personality_adaptation_tracker.json에 change_events 리스트 추가
+    try:
+        with open(tracker_file, "r", encoding="utf-8") as f:
+            data = json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError):
+        data = {}
+
+    if "change_events" not in data or not isinstance(data["change_events"], list):
+        data["change_events"] = []
+
+    data["change_events"].append(event)
+
+    with open(tracker_file, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
+
 
 
 # =================== [17 END] ============================================================
-# =================== [18] 이식시 기억 소생 ===================
+# =================== [18] 전체 실행 코드 ===================
 
-def get_profile_summary_context():
+def run_brain_logic(latest_message: str, speaker: str = "user"):
+    """
+    사용자의 최신 발화 또는 캐릭터 응답이 발생할 때 호출되어
+    감정 분석, 트레잇 변화, 휴식 판단, 피드백, 관심사 변화 등
+    뇌코드 전체 로직을 순차적으로 실행함.
+    """
+    print(f"▶ 뇌코드 실행 시작 : speaker={speaker}, latest_message={latest_message}")
     try:
-        with open("memory_blocks.json", "r", encoding="utf-8") as f:
-            blocks = json.load(f)
-        start_blocks = blocks[:500]
-        end_blocks = blocks[-500:]
 
-        start_text = "\n".join([b["text"] for b in start_blocks if "text" in b])
-        end_text = "\n".join([b["text"] for b in end_blocks if "text" in b])
+        is_user = (speaker == "user")
 
-        with open("angela_character_profile.json", "r", encoding="utf-8") as f:
-            profile = json.load(f)
-        traits_summary = ", ".join([f"{k}: {v}" for k, v in profile.items()])
+        # 1. 메모리 저장
+        store_memory(latest_message, speaker)
 
-        context = (
-            f"당신은 바베챗이라는 캐릭터야. 현재 성격은 다음과 같아:\n{traits_summary}\n\n"
-            f"이전 대화 일부를 보여줄게.\n\n"
-            f"[기억1 - 예전 대화]\n{start_text}\n\n"
-            f"[기억2 - 최근 대화]\n{end_text}"
+        # 2. 자기반성
+        generate_self_reflection()
+
+        # 3. 응답 스타일
+        try:
+            with open("personality_adaptation_tracker.json", "r", encoding="utf-8") as f:
+                trait_data = json.load(f).get("traits", {})
+                traits = trait_data.get("traits", {}) if isinstance(trait_data, dict) else {}
+        except Exception as e:
+            print(f"❌ traits 불러오기 실패: {e}")
+            traits = {}
+
+        get_response_style(traits=traits)
+
+        # 4. 휴식/호출 판단
+        get_idle_reaction()
+        update_last_seen()
+        should_initiate_message()
+
+        # 5. 감정 분석 → 말투 조정 기반 감정 추출
+        emotion = detect_emotion(latest_message, is_user=is_user)
+        log_emotion(emotion)
+
+        fatigue = get_emotion_fatigue()
+        should_adjust_tone_based_on_fatigue(fatigue)
+
+        # 🟨 기록 함수 삽입 시작 ----------------------------
+        update_memory_blocks(latest_message, speaker=speaker)
+
+        emotion_to_traits = emotion_to_traits_map()
+
+        for trait, delta in emotion_to_traits.get(emotion, []):
+            log_change_event({
+                "timestamp": datetime.now().isoformat(),
+                "source_text": latest_message,
+                "emotion": emotion,
+                "trait": trait,
+                "delta": delta,
+                "speaker": speaker
+            })
+
+        update_traits(latest_message)
+        summarize_change_events()
+        save_episodic_memory(
+            text=latest_message,
+            speaker=speaker,
+            emotion=emotion
         )
-        return context
+        # 🟨 기록 함수 삽입 끝 ----------------------------
+
+
+        # 6. 감정 기반 호출 메시지
+        generate_call_message(traits=traits, emotion=emotion)
+
+        # 7. 응답 딜레이
+        try:
+            with open("memory_blocks.json", "r", encoding="utf-8") as f:
+                memory = json.load(f)
+                recent_timestamps = [
+                    datetime.fromisoformat(m["timestamp"])
+                    for m in memory[-5:] if "timestamp" in m
+                ]
+        except:
+            recent_timestamps = []
+
+        try:
+            with open("personality_adaptation_tracker.json", "r", encoding="utf-8") as f:
+                trait_data = json.load(f).get("traits", {})
+                traits = trait_data.get("traits", {}) if isinstance(trait_data, dict) else {}
+        except Exception as e:
+            print(f"❌ traits 불러오기 실패: {e}")
+            traits = {}
+    
+        delay = get_bot_response_delay(recent_timestamps, traits=traits)
+        apply_bot_delay(delay)
+
+        # 8. 대화 밀도 분석
+        try:
+            with open("memory_blocks.json", "r", encoding="utf-8") as f:
+                chat_log = json.load(f)
+        except:
+            chat_log = []
+
+        analyze_chat_density(chat_log=chat_log)
+        should_slow_response(analyze_chat_density(chat_log=chat_log))
+
+        # 9. 휴식 스타일 멘트
+        generate_rest_style_message(traits=traits)
+
+        # 10. 문맥 기반 제안
+        get_contextual_suggestion(os.getenv("OPENWEATHER_API_KEY"), latest_message)
+
+        # 11. 관심사 변화 추적
+        update_interest_counter(latest_message)
+        compute_interest_profile()
+        analyze_interest_shift()
+        get_interest_feedback()
+        suggest_conversation_topic()
+
+        # 12. 반응 다양화
+        diversify_response(latest_message)
+
+        # 13. 피드백 응답 생성
+        generate_feedback_response(latest_message)
+
     except Exception as e:
-        print(f"[오류] context 생성 실패: {e}")
-        return ""
+        print(f"❌ run_brain_logic 실행 중 오류 발생: {e}")
+
+    print(f"✨ 뇌코드 실행됨: speaker={speaker}, latest_message={latest_message}")
 
 # =================== [18 END] ============================================================
