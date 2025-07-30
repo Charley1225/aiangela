@@ -131,8 +131,12 @@ async def on_message(message):
     # 8. 캐릭터 발화 저장
     store_memory(response, "character")
 
-    # 9. 최종 응답 출력 (맥락 멘트 + 응답 합치기)
-    final_response = f"{context_msg}\n{response}" if context_msg else response
+    # 9. 최종 응답 출력 (선톡 시만 context_msg 포함)
+    if should_initiate_message():
+        final_response = f"{context_msg}\n{response}" if context_msg else response
+    else:
+        final_response = response
+
     await message.channel.send(final_response)
 
     # 10. 명령어 핸들링
