@@ -2,8 +2,11 @@ import os
 import discord
 from discord.ext import commands
 from sonnet_chat import ask_sonnet
+from brain import run_brain_logic, get_contextual_suggestion, get_idle_reaction, get_bot_response_delay, store_memory, generate_call_message, should_initiate_message
 import json
 import schedule
+from datetime import datetime
+import asyncio
 
 intents = discord.Intents.default()
 intents.message_content = True
@@ -80,22 +83,41 @@ async def on_ready():
 
 @bot.event
 async def on_message(message):
-    if message.author.bot:
+    if message.author == bot.user:
         return
 
-    # (1) 유저 발화 기록
-    from brain import run_brain_logic
-    run_brain_logic(message.content, speaker="user")
+    user_text = message.content
+    speaker = "user"
 
-    # (2) 캐릭터 응답 생성
-    from sonnet_chat import ask_sonnet
-    response = ask_sonnet(message.content, system=character_prompt)
-    await message.channel.send(response)
+    # 1. 뇌코드 실행 (기억 저장, 감정 태깅 등)
+    run_brain_logic(latest_message=user_text, speaker=speaker)
 
-    # (3) 캐릭터 발화 기록
-    run_brain_logic(response, speaker="character")
+    # 2. 선톡 판단 (대화 밀도 분석 기반 먼저 말 걸기)
+    if should_initiate_message():
+        call_msg = generate_call_message()
+        await message.channel.send(call_msg)
 
-    # 기존 명령어들도 유지하려면 이 줄 추가!
+    # 3. 자리 비움 기반 멘트 생성
+    idle_msg = get_idle_reaction()
+    if idle_msg:
+        await message.channel.send(idle_msg)
+
+    # 4. 챗봇 응답 지연 계산 및 반영
+    delay_sec = get_bot_response_delay()
+    if delay_sec:
+        await asyncio.sleep(delay_sec)
+
+    # 5. 날씨/시간/요일/도시 기반 맥락 멘트 생성
+    context_msg = get_contextual_suggestion(api_key=os.getenv("OPENWEATHER_API_KEY"), last_user_text=user_text)
+
+    # 6. 소네트 응답 생성
+    response = ask_sonnet(prompt=user_text, system=character_prompt)
+
+    # 7. 최종 응답 출력 (맥락 멘트 + 응답 합치기)
+    final_response = f"{context_msg}\n{response}" if context_msg else response
+    await message.channel.send(final_response)
+
+    # 8. 명령어 핸들링도 잊지 말고 마지막에
     await bot.process_commands(message)
 
 @bot.command(name="성격변화해")
@@ -113,6 +135,60 @@ async def trait_off(ctx):
     with open("trait_change_enabled.json", "w", encoding="utf-8") as f:
         json.dump({"enabled": False}, f, ensure_ascii=False)
     await ctx.send("⏹️ 성격 변화 반영: **OFF**")
+
+@bot.command(name="성격지표")
+async def show_traits(ctx):
+    try:
+        with open("personality_adaptation_tracker.json", "r", encoding="utf-8") as f:
+            traits = json.load(f)
+
+        msg_lines = ["🧬 현재 캐릭터 성격 지표:\n"]
+        for trait, values in traits.items():
+            base = values.get("baseline", "?")
+            curr = values.get("current", "?")
+            delta = round(curr - base, 3)
+            arrow = "🔼" if delta > 0 else "🔽" if delta < 0 else "➖"
+            msg_lines.append(f"- {trait}: {curr:.3f} ({arrow} {delta:+.3f})")
+
+        await ctx.send("\n".join(msg_lines))
+
+    except Exception as e:
+        await ctx.send(f"❌ 성격 지표 확인 실패: {e}")
+
+@bot.command(name="감정지표")
+async def emotion_stats(ctx):
+    try:
+        with open("episodic_memories.json", "r", encoding="utf-8") as f:
+            episodes = json.load(f)
+
+        emotion_counts = {}
+        recent = episodes[-100:] if len(episodes) > 100 else episodes
+        for ep in recent:
+            emo = ep.get("emotion", "알 수 없음")
+            emotion_counts[emo] = emotion_counts.get(emo, 0) + 1
+
+        total = sum(emotion_counts.values())
+        lines = ["🧠 최근 감정 통계:"]
+        for emo, count in emotion_counts.items():
+            pct = round(count / total * 100)
+            lines.append(f"{emo}: {pct}%")
+
+        await ctx.send("\n".join(lines))
+
+    except Exception as e:
+        await ctx.send(f"❌ 감정 지표 확인 실패: {e}")
+
+@bot.command(name="기억수")
+async def memory_count(ctx):
+    try:
+        with open("memory_blocks.json", "r", encoding="utf-8") as f:
+            memories = json.load(f)
+        with open("personality_adaptation_tracker.json", "r", encoding="utf-8") as f:
+            traits = json.load(f)
+
+        await ctx.send(f"🧠 총 기억 수: {len(memories)}개\n🧬 현재 트레잇 변화 수: {len(traits)}개")
+    except Exception as e:
+        await ctx.send(f"❌ 기억 수 확인 실패: {e}")
 
 @bot.command(name="바베챗이식")
 async def transplant_memory(ctx):
@@ -155,5 +231,7 @@ async def run_schedule_loop():
         schedule.run_pending()
         await asyncio.sleep(3600)  # 3600초(1시간)마다 확인
 
-TOKEN = os.getenv("DISCORD_BOT_TOKEN")
-bot.run(TOKEN)
+if __name__ == "__main__":
+    from keep_alive import keep_alive
+    keep_alive()
+    bot.run(os.getenv("DISCORD_TOKEN"))
