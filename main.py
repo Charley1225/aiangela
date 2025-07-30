@@ -84,6 +84,8 @@ async def on_ready():
 
 @bot.event
 async def on_message(message):
+    print(f"[on_message 진입]: {message.author} - {message.content}")  # ✅ 디버깅용
+
     if message.author == bot.user:
         return
 
