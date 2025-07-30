@@ -129,7 +129,7 @@ async def on_message(message):
     response = ask_sonnet(prompt=user_text, system=character_prompt)
 
     # 8. 캐릭터 발화 저장
-    store_memory(text=response, speaker="character")
+    store_memory(response, speaker="character")
 
     # 9. 최종 응답 출력 (맥락 멘트 + 응답 합치기)
     final_response = f"{context_msg}\n{response}" if context_msg else response
