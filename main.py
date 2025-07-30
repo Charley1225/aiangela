@@ -135,7 +135,7 @@ async def on_ready():
         preload = "이전 대화를 참고해줘:\n" + "\n".join(lines)
         from sonnet_chat import ask_sonnet
         system_prompt = character_prompt + get_time_context()
-        ask_sonnet(preload, system=system_prompt)
+        await ask_sonnet(preload, system=system_prompt)
     except Exception as e:
         print(f"❌ 이식 실패: {e}")
 
