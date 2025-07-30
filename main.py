@@ -231,7 +231,8 @@ async def run_schedule_loop():
         schedule.run_pending()
         await asyncio.sleep(3600)  # 3600초(1시간)마다 확인
 
+# ✅ 실행 시작
 if __name__ == "__main__":
-    from keep_alive import keep_alive
-    keep_alive()
-    bot.run(os.getenv("DISCORD_TOKEN"))
+    loop = asyncio.get_event_loop()
+    loop.create_task(run_schedule_loop())  # 🧠 스케줄 병렬 실행
+    loop.run_until_complete(bot.start(os.getenv("DISCORD_BOT_TOKEN")))
