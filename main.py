@@ -111,7 +111,7 @@ async def on_message(message):
     # 3. 챗봇 응답 지연 계산 및 반영
     # delay_sec = get_bot_response_delay(recent_timestamps)
     # if delay_sec:
-        # await asyncio.sleep(delay_sec / 100)
+        # await asyncio.sleep(delay_sec / 500)
 
     # 4. 선톡 판단 (대화 밀도 분석 기반 먼저 말 걸기)
     if should_initiate_message():
@@ -143,7 +143,7 @@ async def on_message(message):
     # 10. 명령어 핸들링
     await bot.process_commands(message)
 
-@bot.command(name="성격변화해")
+@bot.command(name="성격변화")
 async def trait_on(ctx):
     global TRAIT_CHANGE_ENABLED
     TRAIT_CHANGE_ENABLED = True
@@ -151,7 +151,7 @@ async def trait_on(ctx):
         json.dump({"enabled": True}, f, ensure_ascii=False)
     await ctx.send("✅ 성격 변화 반영: **ON**")
 
-@bot.command(name="성격변하지마")
+@bot.command(name="성격고정")
 async def trait_off(ctx):
     global TRAIT_CHANGE_ENABLED
     TRAIT_CHANGE_ENABLED = False
@@ -169,9 +169,16 @@ async def show_traits(ctx):
         for trait, values in traits.items():
             base = values.get("baseline", "?")
             curr = values.get("current", "?")
-            delta = round(curr - base, 3)
-            arrow = "🔼" if delta > 0 else "🔽" if delta < 0 else "➖"
-            msg_lines.append(f"- {trait}: {curr:.3f} ({arrow} {delta:+.3f})")
+
+            # 숫자형으로 변환 시도
+            try:
+                base = float(base)
+                curr = float(curr)
+                delta = round(curr - base, 3)
+                arrow = "🔼" if delta > 0 else "🔽" if delta < 0 else "➖"
+                msg_lines.append(f"- {trait}: {curr:.3f} ({arrow} {delta:+.3f})")
+            except:
+                msg_lines.append(f"- {trait}: {curr} (값 오류)")
 
         await ctx.send("\n".join(msg_lines))
 
@@ -188,13 +195,19 @@ async def emotion_stats(ctx):
         recent = episodes[-100:] if len(episodes) > 100 else episodes
         for ep in recent:
             emo = ep.get("emotion", "알 수 없음")
+            print(f"✅ 감정 감지됨: {emo}")  # 로그
             emotion_counts[emo] = emotion_counts.get(emo, 0) + 1
 
         total = sum(emotion_counts.values())
+        print(f"✅ 총 감정 수: {total}, 세부: {emotion_counts}")  # 로그
+
         lines = ["🧠 최근 감정 통계:"]
-        for emo, count in emotion_counts.items():
-            pct = round(count / total * 100)
-            lines.append(f"{emo}: {pct}%")
+        if total == 0:
+            lines.append("최근 감정 기록이 없어.")
+        else:
+            for emo, count in emotion_counts.items():
+                pct = round(count / total * 100)
+                lines.append(f"{emo}: {pct}%")
 
         await ctx.send("\n".join(lines))
 
