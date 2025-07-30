@@ -2098,26 +2098,26 @@ def run_brain_logic(latest_message: str, speaker: str = "user"):
         generate_call_message(traits=traits, emotion=emotion)
 
         # 7. 응답 딜레이
-        try:
-            with open("memory_blocks.json", "r", encoding="utf-8") as f:
-                memory = json.load(f)
-                recent_timestamps = [
-                    datetime.fromisoformat(m["timestamp"])
-                    for m in memory[-5:] if "timestamp" in m
-                ]
-        except:
-            recent_timestamps = []
+#        try:
+#            with open("memory_blocks.json", "r", encoding="utf-8") as f:
+#                memory = json.load(f)
+#                recent_timestamps = [
+#                    datetime.fromisoformat(m["timestamp"])
+#                    for m in memory[-5:] if "timestamp" in m
+#                ]
+#        except:
+#            recent_timestamps = []
 
-        try:
-            with open("personality_adaptation_tracker.json", "r", encoding="utf-8") as f:
-                trait_data = json.load(f).get("traits", {})
-                traits = trait_data.get("traits", {}) if isinstance(trait_data, dict) else {}
-        except Exception as e:
-            print(f"❌ traits 불러오기 실패: {e}")
-            traits = {}
+#        try:
+#            with open("personality_adaptation_tracker.json", "r", encoding="utf-8") as f:
+#                trait_data = json.load(f).get("traits", {})
+#                traits = trait_data.get("traits", {}) if isinstance(trait_data, dict) else {}
+#        except Exception as e:
+#            print(f"❌ traits 불러오기 실패: {e}")
+#            traits = {}
     
-        delay = get_bot_response_delay(recent_timestamps, traits=traits)
-        apply_bot_delay(delay / 1000)
+#        delay = get_bot_response_delay(recent_timestamps, traits=traits)
+#        apply_bot_delay(delay / 10000)
 
         # 8. 대화 밀도 분석
         try:

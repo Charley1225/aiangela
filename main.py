@@ -111,7 +111,7 @@ async def on_message(message):
     # 3. 챗봇 응답 지연 계산 및 반영
     # delay_sec = get_bot_response_delay(recent_timestamps)
     # if delay_sec:
-        # await asyncio.sleep(delay_sec / 1000)
+        # await asyncio.sleep(delay_sec / 10000)
 
     # 4. 선톡 판단 (대화 밀도 분석 기반 먼저 말 걸기)
     if should_initiate_message():
@@ -168,8 +168,13 @@ async def show_traits(ctx):
 
         msg_lines = ["🧬 현재 캐릭터 성격 지표:\n"]
         for trait, values in traits.items():
-            base = float(values.get("baseline", 0))
-            curr = float(values.get("current", 0))
+            if isinstance(values, dict):
+                base = float(values.get("baseline", 0))
+                curr = float(values.get("current", 0))
+            else:
+                base = 0.5  # 기본값
+                curr = float(values)
+
             delta = round(curr - base, 3)
             arrow = "🔼" if delta > 0 else "🔽" if delta < 0 else "➖"
             msg_lines.append(f"- {trait}: {curr:.3f} ({arrow} {delta:+.3f})")
