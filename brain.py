@@ -78,7 +78,7 @@ def detect_emotion(text: str, is_user: bool = True) -> str:
                 url = "https://openrouter.ai/api/v1/chat/completions",
                 headers=headers,
                 json=payload,
-                timeout=10
+                timeout=5
             )
             response.raise_for_status()
             result = response.json()
@@ -1437,7 +1437,7 @@ def get_weather_summary(api_key: str = None, city_en: str = "Seoul", country_cod
             return "날씨 API 키가 설정되지 않았어."
 
         url = f"http://api.openweathermap.org/data/2.5/weather?q={city_en},{country_code}&appid={api_key}&lang=kr&units=metric"
-        response = requests.get(url, timeout=10)
+        response = requests.get(url, timeout=3)
         response.raise_for_status()  # HTTP 에러 체크
         data = response.json()
         weather = data["weather"][0]["description"]
@@ -1846,7 +1846,7 @@ def summarize_with_sonnet(text: str, max_tokens: int = 100) -> str:
             "https://openrouter.ai/api/v1/chat/completions",
             headers=headers,
             json=payload,
-            timeout=10
+            timeout=5
         )
         response.raise_for_status()
         result = response.json()
