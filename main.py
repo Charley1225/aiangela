@@ -116,6 +116,36 @@ def build_conversation_context(n=5):
         return ""
 
 
+async def proactive_initiator():
+    await bot.wait_until_ready()
+    channel_id = os.getenv("TARGET_CHANNEL_ID")  # 선톡 보낼 채널 ID
+    if not channel_id:
+        print("❌ 환경변수에 TARGET_CHANNEL_ID 없음")
+        return
+    channel = bot.get_channel(int(channel_id))
+
+    while not bot.is_closed():
+        try:
+            # 최근 타임스탬프 가져오기
+            with open("memory_blocks.json", "r", encoding="utf-8") as f:
+                blocks = json.load(f)
+            recent_user_blocks = [b for b in blocks if b.get("speaker") == "user" and "timestamp" in b]
+            recent_user_blocks.sort(key=lambda x: x["timestamp"], reverse=True)
+            recent_timestamps = [
+                datetime.fromisoformat(b["timestamp"]) for b in recent_user_blocks[:5]
+            ]
+            last_user_text = recent_user_blocks[0]["text"] if recent_user_blocks else ""
+
+            if should_initiate_message(recent_timestamps, last_user_text):
+                msg = generate_call_message()
+                await channel.send(msg)
+        except Exception as e:
+            print(f"❌ 선톡 시도 중 오류: {e}")
+
+        await asyncio.sleep(120)  # 2분마다 체크
+
+
+
 @bot.event
 async def on_ready():
     print(f"✅ 로그인 완료: {bot.user}")
@@ -333,4 +363,5 @@ async def run_schedule_loop():
 if __name__ == "__main__":
     loop = asyncio.get_event_loop()
     loop.create_task(run_schedule_loop())  # 🧠 스케줄 병렬 실행
+    loop.create_task(proactive_initiator())  # ✅ 선톡 루프
     loop.run_until_complete(bot.start(os.getenv("DISCORD_BOT_TOKEN")))
