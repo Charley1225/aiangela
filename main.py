@@ -127,7 +127,7 @@ async def on_message(message):
     context_msg = get_contextual_suggestion(api_key=os.getenv("OPENWEATHER_API_KEY"), last_user_text=user_text)
 
     # 7. 소네트 응답 생성
-    response = ask_sonnet(prompt=user_text, system=character_prompt)
+    response = await ask_sonnet(prompt=user_text, system=character_prompt)
 
     # 8. 캐릭터 발화 저장
     store_memory(response, "character")
@@ -247,8 +247,7 @@ async def transplant_memory(ctx):
         final_prompt = f"이건 지금까지의 우리 대화 중 일부야. 참고만 해줘:\n\n{final_prompt}"
 
         # 캐릭터에게 전달
-        from sonnet_chat import ask_sonnet
-        response = ask_sonnet(final_prompt, system=character_prompt)
+        response = await ask_sonnet(final_prompt, system=character_prompt)
 
         await ctx.send("🧠 과거 대화가 성공적으로 이식됐어.")
     except Exception as e:
