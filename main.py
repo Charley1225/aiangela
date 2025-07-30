@@ -109,9 +109,9 @@ async def on_message(message):
         recent_timestamps = []
 
     # 3. 챗봇 응답 지연 계산 및 반영
-    # delay_sec = get_bot_response_delay(recent_timestamps)
-    # if delay_sec:
-        # await asyncio.sleep(delay_sec / 10000)
+    delay_sec = get_bot_response_delay(recent_timestamps)
+    if delay_sec:
+        await asyncio.sleep(delay_sec / 1000)
 
     # 4. 선톡 판단 (대화 밀도 분석 기반 먼저 말 걸기)
     if should_initiate_message():
