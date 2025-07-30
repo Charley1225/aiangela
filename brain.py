@@ -2117,7 +2117,7 @@ def run_brain_logic(latest_message: str, speaker: str = "user"):
             traits = {}
     
         delay = get_bot_response_delay(recent_timestamps, traits=traits)
-        apply_bot_delay(delay / 500)
+        apply_bot_delay(delay / 1000)
 
         # 8. 대화 밀도 분석
         try:

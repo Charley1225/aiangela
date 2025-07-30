@@ -111,7 +111,7 @@ async def on_message(message):
     # 3. 챗봇 응답 지연 계산 및 반영
     # delay_sec = get_bot_response_delay(recent_timestamps)
     # if delay_sec:
-        # await asyncio.sleep(delay_sec / 500)
+        # await asyncio.sleep(delay_sec / 1000)
 
     # 4. 선톡 판단 (대화 밀도 분석 기반 먼저 말 걸기)
     if should_initiate_message():
@@ -163,22 +163,16 @@ async def trait_off(ctx):
 async def show_traits(ctx):
     try:
         with open("personality_adaptation_tracker.json", "r", encoding="utf-8") as f:
-            traits = json.load(f)
+            full_data = json.load(f)
+            traits = full_data.get("traits", {})
 
         msg_lines = ["🧬 현재 캐릭터 성격 지표:\n"]
         for trait, values in traits.items():
-            base = values.get("baseline", "?")
-            curr = values.get("current", "?")
-
-            # 숫자형으로 변환 시도
-            try:
-                base = float(base)
-                curr = float(curr)
-                delta = round(curr - base, 3)
-                arrow = "🔼" if delta > 0 else "🔽" if delta < 0 else "➖"
-                msg_lines.append(f"- {trait}: {curr:.3f} ({arrow} {delta:+.3f})")
-            except:
-                msg_lines.append(f"- {trait}: {curr} (값 오류)")
+            base = float(values.get("baseline", 0))
+            curr = float(values.get("current", 0))
+            delta = round(curr - base, 3)
+            arrow = "🔼" if delta > 0 else "🔽" if delta < 0 else "➖"
+            msg_lines.append(f"- {trait}: {curr:.3f} ({arrow} {delta:+.3f})")
 
         await ctx.send("\n".join(msg_lines))
 
