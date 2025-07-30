@@ -92,32 +92,43 @@ async def on_message(message):
     # 1. 뇌코드 실행 (기억 저장, 감정 태깅 등)
     run_brain_logic(latest_message=user_text, speaker=speaker)
 
-    # 2. 선톡 판단 (대화 밀도 분석 기반 먼저 말 걸기)
+    # 2. memory_blocks.json에서 최근 10개 대화의 타임스탬프 가져오기
+    try:
+        with open("memory_blocks.json", "r", encoding="utf-8") as f:
+            memories = json.load(f)
+        recent_timestamps = [m["timestamp"] for m in memories[-10:] if "timestamp" in m]
+    except:
+        recent_timestamps = []
+
+    # 3. 챗봇 응답 지연 계산 및 반영
+    delay_sec = get_bot_response_delay(recent_timestamps)
+    if delay_sec:
+        await asyncio.sleep(delay_sec)
+
+    # 4. 선톡 판단 (대화 밀도 분석 기반 먼저 말 걸기)
     if should_initiate_message():
         call_msg = generate_call_message()
         await message.channel.send(call_msg)
 
-    # 3. 자리 비움 기반 멘트 생성
+    # 5. 자리 비움 기반 멘트 생성
     idle_msg = get_idle_reaction()
     if idle_msg:
         await message.channel.send(idle_msg)
 
-    # 4. 챗봇 응답 지연 계산 및 반영
-    delay_sec = get_bot_response_delay()
-    if delay_sec:
-        await asyncio.sleep(delay_sec)
-
-    # 5. 날씨/시간/요일/도시 기반 맥락 멘트 생성
+    # 6. 날씨/시간/요일/도시 기반 맥락 멘트 생성
     context_msg = get_contextual_suggestion(api_key=os.getenv("OPENWEATHER_API_KEY"), last_user_text=user_text)
 
-    # 6. 소네트 응답 생성
+    # 7. 소네트 응답 생성
     response = ask_sonnet(prompt=user_text, system=character_prompt)
 
-    # 7. 최종 응답 출력 (맥락 멘트 + 응답 합치기)
+    # 8. 캐릭터 발화 저장
+    store_memory(text=response, speaker="character")
+
+    # 9. 최종 응답 출력 (맥락 멘트 + 응답 합치기)
     final_response = f"{context_msg}\n{response}" if context_msg else response
     await message.channel.send(final_response)
 
-    # 8. 명령어 핸들링도 잊지 말고 마지막에
+    # 10. 명령어 핸들링
     await bot.process_commands(message)
 
 @bot.command(name="성격변화해")
