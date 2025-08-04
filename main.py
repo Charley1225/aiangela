@@ -220,10 +220,7 @@ async def on_message(message):
     store_memory(response, "character")
 
     # 9. 최종 응답 출력 (선톡 시만 context_msg 포함)
-    if should_initiate_message(recent_timestamps, user_text):
-        final_response = f"{context_msg}\n{response}" if context_msg else response
-    else:
-        final_response = response
+    final_response = response
 
     await message.channel.send(final_response)
 
